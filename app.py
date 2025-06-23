@@ -41,14 +41,17 @@ elif page == "Upload Answers":
 
 elif page == "Run Grading":
     st.header("🎯 Run Semantic Grading")
+    
+    debug_mode = st.checkbox("Enable Debug Mode", help="Show detailed analysis of grading process")
+    
     if st.button("Run Grading & Save to DB"):
         clear_grades()
-        results = grade_all()
+        results = grade_all(debug=debug_mode)
         save_grades(results)
         st.success("✅ Grading completed.")
 
     st.subheader("📊 Grading Results")
-    graded = grade_all()
+    graded = grade_all(debug=debug_mode)
     for r in graded:
         with st.expander(f"{r['student_name']} ({r['student_roll_no']}) - Grade: {r['grade']}"):
             st.markdown(f"**Correct %:** {r['correct_%']}")

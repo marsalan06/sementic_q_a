@@ -1,8 +1,8 @@
-from core.grader import calculate_similarity_with_feedback
+from core.grader import calculate_similarity_with_feedback, debug_grading
 from core.db import get_questions, get_student_answers
 from bson.objectid import ObjectId
 
-def grade_all():
+def grade_all(debug=False):
     questions = get_questions()
     answers = get_student_answers()
     results = []
@@ -13,6 +13,9 @@ def grade_all():
         rules = q["marking_scheme"]
 
         for student in filter(lambda a: a["question_id"] == qid, answers):
+            if debug:
+                debug_grading(student["student_ans"], sample, rules)
+                
             feedback = calculate_similarity_with_feedback(
                 student["student_ans"], sample, rules
             )
