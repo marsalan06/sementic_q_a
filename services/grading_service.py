@@ -1,4 +1,4 @@
-from core.grader import calculate_similarity_with_feedback, debug_grading
+from core.grader import calculate_similarity_with_feedback, debug_grading, match_rule
 from core.db import get_questions, get_student_answers
 from bson.objectid import ObjectId
 
