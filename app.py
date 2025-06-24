@@ -96,8 +96,10 @@ elif page == "Run Grading":
             graded = grade_all(debug=debug_mode)
     
     if graded:
-        for r in graded:
+        for i, r in enumerate(graded):
             with st.expander(f"{r['student_name']} ({r['student_roll_no']}) - Grade: {r['grade']}"):
+                st.markdown(f"**Student Answer:**")
+                st.text_area("Answer", value=r.get('student_answer', 'No answer available'), height=100, disabled=True, key=f"answer_{i}_{r['student_roll_no']}")
                 st.markdown(f"**Correct %:** {r['correct_%']}")
                 st.markdown("✅ **Matched Rules:**")
                 st.write(r["matched_rules"])

@@ -22,6 +22,7 @@ def grade_all(debug=False):
             results.append({
                 "student_name": student["student_name"],
                 "student_roll_no": student["student_roll_no"],
+                "student_answer": student["student_ans"],
                 "question_id": qid,
                 "correct_%": f"{feedback['score'] * 100:.2f}%",
                 "grade": feedback['grade'],
