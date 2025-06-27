@@ -3,32 +3,72 @@ from core.db import get_questions, get_student_answers, get_grade_thresholds
 from bson.objectid import ObjectId
 
 def grade_all(debug=False, user_id=None):
-    questions = get_questions(user_id)
-    answers = get_student_answers(user_id)
-    grade_thresholds = get_grade_thresholds(user_id)
-    results = []
+    """Grade all student answers for a user with proper error handling"""
+    try:
+        if not user_id:
+            return []
+        
+        questions = get_questions(user_id)
+        answers = get_student_answers(user_id)
+        grade_thresholds = get_grade_thresholds(user_id)
+        
+        if not questions:
+            print("No questions found for user")
+            return []
+        
+        if not answers:
+            print("No student answers found for user")
+            return []
+        
+        results = []
 
-    for q in questions:
-        qid = str(q["_id"])
-        sample = q["sample_answer"]
-        rules = q["marking_scheme"]
-
-        for student in filter(lambda a: a["question_id"] == qid, answers):
-            if debug:
-                debug_grading(student["student_ans"], sample, rules)
+        for q in questions:
+            try:
+                qid = str(q["_id"])
+                sample = q.get("sample_answer", "")
+                rules = q.get("marking_scheme", [])
                 
-            feedback = calculate_similarity_with_feedback(
-                student["student_ans"], sample, rules, grade_thresholds=grade_thresholds
-            )
-            results.append({
-                "student_name": student["student_name"],
-                "student_roll_no": student["student_roll_no"],
-                "student_answer": student["student_ans"],
-                "question_id": qid,
-                "correct_%": f"{feedback['score'] * 100:.2f}%",
-                "grade": feedback['grade'],
-                "matched_rules": feedback["matched_rules"],
-                "missed_rules": feedback["missed_rules"]
-            })
+                if not sample:
+                    print(f"Warning: No sample answer for question {qid}")
+                    continue
 
-    return results
+                # Filter answers for this question
+                question_answers = [a for a in answers if a.get("question_id") == qid]
+                
+                for student in question_answers:
+                    try:
+                        student_answer = student.get("student_ans", "")
+                        if not student_answer:
+                            print(f"Warning: Empty student answer for {student.get('student_name', 'Unknown')}")
+                            continue
+                        
+                        if debug:
+                            debug_grading(student_answer, sample, rules)
+                            
+                        feedback = calculate_similarity_with_feedback(
+                            student_answer, sample, rules, grade_thresholds=grade_thresholds
+                        )
+                        
+                        results.append({
+                            "student_name": student.get("student_name", "Unknown"),
+                            "student_roll_no": student.get("student_roll_no", "Unknown"),
+                            "student_answer": student_answer,
+                            "question_id": qid,
+                            "correct_%": f"{feedback['score'] * 100:.2f}%",
+                            "grade": feedback['grade'],
+                            "matched_rules": feedback["matched_rules"],
+                            "missed_rules": feedback["missed_rules"]
+                        })
+                    except Exception as e:
+                        print(f"Error grading student {student.get('student_name', 'Unknown')}: {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"Error processing question {q.get('_id', 'Unknown')}: {e}")
+                continue
+
+        return results
+        
+    except Exception as e:
+        print(f"Error in grade_all: {e}")
+        return []

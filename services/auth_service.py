@@ -7,87 +7,154 @@ from config import JWT_SECRET, SESSION_TIMEOUT
 
 def hash_password(password):
     """Hash a password using bcrypt"""
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    try:
+        if not password or not isinstance(password, str):
+            return None
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    except Exception as e:
+        print(f"Error hashing password: {e}")
+        return None
 
 def verify_password(password, hashed):
     """Verify a password against its hash"""
-    return bcrypt.checkpw(password.encode('utf-8'), hashed)
+    try:
+        if not password or not hashed:
+            return False
+        return bcrypt.checkpw(password.encode('utf-8'), hashed)
+    except Exception as e:
+        print(f"Error verifying password: {e}")
+        return False
 
 def create_user(username, email, password):
     """Create a new user account"""
-    db = get_db()
-    
-    # Check if user already exists
-    existing_user = db.users.find_one({
-        "$or": [
-            {"username": username},
-            {"email": email}
-        ]
-    })
-    
-    if existing_user:
-        if existing_user["username"] == username:
-            return False, "Username already exists"
+    try:
+        db = get_db()
+        
+        # Validate inputs
+        if not username or len(username) < 3:
+            return False, "Username must be at least 3 characters long"
+        
+        if not email or "@" not in email:
+            return False, "Please enter a valid email address"
+        
+        if not password or len(password) < 6:
+            return False, "Password must be at least 6 characters long"
+        
+        # Check if user already exists
+        existing_user = db.users.find_one({
+            "$or": [
+                {"username": username},
+                {"email": email}
+            ]
+        })
+        
+        if existing_user:
+            if existing_user["username"] == username:
+                return False, "Username already exists"
+            else:
+                return False, "Email already exists"
+        
+        # Hash password
+        password_hash = hash_password(password)
+        if not password_hash:
+            return False, "Error processing password"
+        
+        # Create new user
+        user = {
+            "username": username,
+            "email": email,
+            "password_hash": password_hash,
+            "created_at": datetime.utcnow(),
+            "last_login": None
+        }
+        
+        result = db.users.insert_one(user)
+        if result.inserted_id:
+            return True, "User created successfully"
         else:
-            return False, "Email already exists"
-    
-    # Create new user
-    user = {
-        "username": username,
-        "email": email,
-        "password_hash": hash_password(password),
-        "created_at": datetime.utcnow(),
-        "last_login": None
-    }
-    
-    db.users.insert_one(user)
-    return True, "User created successfully"
+            return False, "Failed to create user"
+            
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        return False, f"Error creating user: {str(e)}"
 
 def authenticate_user(username, password):
     """Authenticate user and return user data if successful"""
-    db = get_db()
-    
-    user = db.users.find_one({"username": username})
-    if not user:
-        return None, "Invalid username or password"
-    
-    if not verify_password(password, user["password_hash"]):
-        return None, "Invalid username or password"
-    
-    # Update last login
-    db.users.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"last_login": datetime.utcnow()}}
-    )
-    
-    # Remove password hash from user data
-    user.pop("password_hash", None)
-    return user, "Login successful"
+    try:
+        db = get_db()
+        
+        # Validate inputs
+        if not username or not password:
+            return None, "Username and password are required"
+        
+        user = db.users.find_one({"username": username})
+        if not user:
+            return None, "Invalid username or password"
+        
+        if not verify_password(password, user["password_hash"]):
+            return None, "Invalid username or password"
+        
+        # Update last login
+        try:
+            db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"last_login": datetime.utcnow()}}
+            )
+        except Exception as e:
+            print(f"Warning: Could not update last login: {e}")
+        
+        # Remove password hash from user data
+        user.pop("password_hash", None)
+        return user, "Login successful"
+        
+    except Exception as e:
+        print(f"Error authenticating user: {e}")
+        return None, f"Authentication error: {str(e)}"
 
 def create_session_token(user_id, username):
     """Create a JWT session token"""
-    payload = {
-        "user_id": str(user_id),
-        "username": username,
-        "exp": datetime.utcnow() + timedelta(seconds=SESSION_TIMEOUT),
-        "iat": datetime.utcnow()
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    try:
+        if not user_id or not username:
+            return None
+        
+        payload = {
+            "user_id": str(user_id),
+            "username": username,
+            "exp": datetime.utcnow() + timedelta(seconds=SESSION_TIMEOUT),
+            "iat": datetime.utcnow()
+        }
+        return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    except Exception as e:
+        print(f"Error creating session token: {e}")
+        return None
 
 def verify_session_token(token):
     """Verify and decode a JWT session token"""
     try:
+        if not token:
+            return None
+        
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
         return None
+    except Exception as e:
+        print(f"Error verifying session token: {e}")
+        return None
 
 def get_user_by_id(user_id):
     """Get user data by ID"""
-    db = get_db()
-    user = db.users.find_one({"_id": user_id})
-    if user:
-        user.pop("password_hash", None)
-    return user 
+    try:
+        if not user_id:
+            return None
+        
+        db = get_db()
+        user = db.users.find_one({"_id": user_id})
+        if user:
+            user.pop("password_hash", None)
+        return user
+    except Exception as e:
+        print(f"Error getting user by ID: {e}")
+        return None 

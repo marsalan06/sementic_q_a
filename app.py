@@ -133,11 +133,14 @@ def main_app():
             rules.append(rule)
 
         if st.button("Save Question"):
-            save_question(question, sample_answer, rules, st.session_state.user["_id"])
-            # Clear cached grading results when new question is added
-            if 'grading_results' in st.session_state:
-                del st.session_state.grading_results
-            st.success("✅ Question saved successfully.")
+            success, message = save_question(question, sample_answer, rules, st.session_state.user["_id"])
+            if success:
+                st.success(f"✅ {message}")
+                # Clear cached grading results when new question is added
+                if 'grading_results' in st.session_state:
+                    del st.session_state.grading_results
+            else:
+                st.error(f"❌ {message}")
 
     elif page == "Upload Answers":
         st.header("📤 Upload Student Answers")
@@ -159,11 +162,14 @@ def main_app():
             submitted = st.form_submit_button("Submit Answer")
 
         if submitted:
-            save_student_answer(name, roll_no, answer, selected_question_id, st.session_state.user["_id"])
-            # Clear cached grading results when new answer is added
-            if 'grading_results' in st.session_state:
-                del st.session_state.grading_results
-            st.success("✅ Student answer saved successfully.")
+            success, message = save_student_answer(name, roll_no, answer, selected_question_id, st.session_state.user["_id"])
+            if success:
+                st.success(f"✅ {message}")
+                # Clear cached grading results when new answer is added
+                if 'grading_results' in st.session_state:
+                    del st.session_state.grading_results
+            else:
+                st.error(f"❌ {message}")
 
     elif page == "Grade Settings":
         st.header("📋 Grade Settings")
@@ -281,14 +287,15 @@ def main_app():
             submitted = st.form_submit_button("💾 Save Grade Thresholds", disabled=not thresholds_valid)
             
             if submitted and thresholds_valid:
-                save_grade_thresholds(new_thresholds, st.session_state.user["_id"])
-                st.success("✅ Grade thresholds updated successfully!")
-                
-                # Clear cached grading results when thresholds change
-                if 'grading_results' in st.session_state:
-                    del st.session_state.grading_results
-                
-                st.rerun()
+                success, message = save_grade_thresholds(new_thresholds, st.session_state.user["_id"])
+                if success:
+                    st.success(f"✅ {message}")
+                    # Clear cached grading results when thresholds change
+                    if 'grading_results' in st.session_state:
+                        del st.session_state.grading_results
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
         
         # Quick preset buttons
         st.divider()
@@ -299,23 +306,32 @@ def main_app():
         with col1:
             if st.button("📚 Standard (85/70/55/40)"):
                 standard_thresholds = {"A": 85, "B": 70, "C": 55, "D": 40, "F": 0}
-                save_grade_thresholds(standard_thresholds, st.session_state.user["_id"])
-                st.success("✅ Applied standard thresholds!")
-                st.rerun()
+                success, message = save_grade_thresholds(standard_thresholds, st.session_state.user["_id"])
+                if success:
+                    st.success(f"✅ {message}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
         
         with col2:
             if st.button("🎯 Strict (90/80/70/60)"):
                 strict_thresholds = {"A": 90, "B": 80, "C": 70, "D": 60, "F": 0}
-                save_grade_thresholds(strict_thresholds, st.session_state.user["_id"])
-                st.success("✅ Applied strict thresholds!")
-                st.rerun()
+                success, message = save_grade_thresholds(strict_thresholds, st.session_state.user["_id"])
+                if success:
+                    st.success(f"✅ {message}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
         
         with col3:
             if st.button("📖 Lenient (80/65/50/35)"):
                 lenient_thresholds = {"A": 80, "B": 65, "C": 50, "D": 35, "F": 0}
-                save_grade_thresholds(lenient_thresholds, st.session_state.user["_id"])
-                st.success("✅ Applied lenient thresholds!")
-                st.rerun()
+                success, message = save_grade_thresholds(lenient_thresholds, st.session_state.user["_id"])
+                if success:
+                    st.success(f"✅ {message}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
 
     elif page == "Run Grading":
         st.header("🎯 Run Semantic Grading")
@@ -353,11 +369,25 @@ def main_app():
         
         if st.button("Run Grading & Save to DB"):
             with st.spinner("Running grading analysis..."):
-                clear_grades(st.session_state.user["_id"])
+                # Clear existing grades
+                clear_success, clear_message = clear_grades(st.session_state.user["_id"])
+                if not clear_success:
+                    st.warning(f"Warning: {clear_message}")
+                
+                # Run grading
                 results = grade_all(debug=debug_mode, user_id=st.session_state.user["_id"])
-                save_grades(results, st.session_state.user["_id"])
-                st.session_state.grading_results = results
-            st.success("✅ Grading completed.")
+                
+                if results:
+                    # Save grades
+                    save_success, save_message = save_grades(results, st.session_state.user["_id"])
+                    if save_success:
+                        st.success(f"✅ {save_message}")
+                        st.session_state.grading_results = results
+                    else:
+                        st.error(f"❌ {save_message}")
+                else:
+                    st.warning("⚠️ No results to save. Please ensure you have questions and student answers.")
+                    st.session_state.grading_results = []
 
         st.subheader("📊 Grading Results")
         
