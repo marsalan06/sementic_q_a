@@ -5,6 +5,30 @@ from bson.objectid import ObjectId
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 
+# Default grade thresholds
+DEFAULT_GRADE_THRESHOLDS = {
+    "A": 85,
+    "B": 70,
+    "C": 55,
+    "D": 40,
+    "F": 0
+}
+
+def get_grade_thresholds():
+    """Get current grade thresholds from database or return defaults"""
+    thresholds = db.settings.find_one({"type": "grade_thresholds"})
+    if thresholds:
+        return thresholds.get("thresholds", DEFAULT_GRADE_THRESHOLDS)
+    return DEFAULT_GRADE_THRESHOLDS
+
+def save_grade_thresholds(thresholds):
+    """Save grade thresholds to database"""
+    db.settings.update_one(
+        {"type": "grade_thresholds"},
+        {"$set": {"thresholds": thresholds}},
+        upsert=True
+    )
+
 def detect_rule_type(rule_text):
     """Dynamically detect rule type based on content analysis"""
     rule_lower = rule_text.lower()

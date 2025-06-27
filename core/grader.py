@@ -5,18 +5,34 @@ from nltk.stem import WordNetLemmatizer
 model = SentenceTransformer('all-MiniLM-L6-v2')
 lemmatizer = WordNetLemmatizer()
 
-def assign_grade(score):
+def assign_grade(score, grade_thresholds=None):
+    """
+    Assign grade based on score and custom thresholds
+    Args:
+        score: float between 0 and 1
+        grade_thresholds: dict with grade letters as keys and percentage thresholds as values
+    """
+    if grade_thresholds is None:
+        # Default thresholds
+        grade_thresholds = {
+            "A": 85,
+            "B": 70,
+            "C": 55,
+            "D": 40,
+            "F": 0
+        }
+    
     percent = score * 100
-    if percent >= 85:
-        return "A"
-    elif percent >= 70:
-        return "B"
-    elif percent >= 55:
-        return "C"
-    elif percent >= 40:
-        return "D"
-    else:
-        return "F"
+    
+    # Sort thresholds in descending order to check from highest to lowest
+    sorted_thresholds = sorted(grade_thresholds.items(), key=lambda x: x[1], reverse=True)
+    
+    for grade, threshold in sorted_thresholds:
+        if percent >= threshold:
+            return grade
+    
+    # Fallback to lowest grade if no threshold is met
+    return sorted_thresholds[-1][0] if sorted_thresholds else "F"
 
 def normalize(text):
     """Basic lemmatization and lowercasing"""
@@ -206,7 +222,7 @@ def debug_grading(student_answer, sample, rules):
             print(f"  Important Student Words: {student_important}")
             print(f"  Overlap: {student_important.intersection(rule_important)}")
 
-def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=0.2):
+def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=0.2, grade_thresholds=None):
     student_emb = model.encode(student_answer, convert_to_tensor=True)
     sample_emb = model.encode(sample, convert_to_tensor=True)
     sample_score = util.cos_sim(student_emb, sample_emb).item()
@@ -240,7 +256,7 @@ def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=
 
     return {
         "score": final_score,
-        "grade": assign_grade(final_score),
+        "grade": assign_grade(final_score, grade_thresholds),
         "matched_rules": matched,
         "missed_rules": missed
     }
