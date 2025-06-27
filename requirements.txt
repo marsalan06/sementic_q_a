@@ -1,3 +1,6 @@
 streamlit
 pymongo
 sentence-transformers
+bcrypt
+python-dotenv
+PyJWT

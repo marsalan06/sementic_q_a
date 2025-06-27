@@ -2,10 +2,10 @@ from core.grader import calculate_similarity_with_feedback, debug_grading, match
 from core.db import get_questions, get_student_answers, get_grade_thresholds
 from bson.objectid import ObjectId
 
-def grade_all(debug=False):
-    questions = get_questions()
-    answers = get_student_answers()
-    grade_thresholds = get_grade_thresholds()
+def grade_all(debug=False, user_id=None):
+    questions = get_questions(user_id)
+    answers = get_student_answers(user_id)
+    grade_thresholds = get_grade_thresholds(user_id)
     results = []
 
     for q in questions:
