@@ -157,4 +157,50 @@ def get_user_by_id(user_id):
         return user
     except Exception as e:
         print(f"Error getting user by ID: {e}")
+        return None
+
+def refresh_session_token(token):
+    """Refresh a session token if it's still valid"""
+    try:
+        if not token:
+            return None
+        
+        # Decode the token without checking expiration
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"verify_exp": False})
+        
+        # Check if token is within refresh window (e.g., 5 minutes before expiry)
+        exp_timestamp = payload.get('exp')
+        if exp_timestamp:
+            current_time = datetime.utcnow().timestamp()
+            time_until_expiry = exp_timestamp - current_time
+            
+            # If token expires in more than 5 minutes, refresh it
+            if time_until_expiry > 300:  # 5 minutes
+                return create_session_token(payload['user_id'], payload['username'])
+        
+        return None
+    except jwt.InvalidTokenError:
+        return None
+    except Exception as e:
+        print(f"Error refreshing session token: {e}")
+        return None
+
+def get_session_info(token):
+    """Get session information without verifying expiration"""
+    try:
+        if not token:
+            return None
+        
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"verify_exp": False})
+        return {
+            "user_id": payload.get('user_id'),
+            "username": payload.get('username'),
+            "expires_at": payload.get('exp'),
+            "issued_at": payload.get('iat'),
+            "is_expired": datetime.utcnow().timestamp() > payload.get('exp', 0) if payload.get('exp') else True
+        }
+    except jwt.InvalidTokenError:
+        return None
+    except Exception as e:
+        print(f"Error getting session info: {e}")
         return None 

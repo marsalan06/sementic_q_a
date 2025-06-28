@@ -9,7 +9,7 @@ DB_NAME = "semantic_grader"
 
 # Security Configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
-SESSION_TIMEOUT = 3600  # 1 hour in seconds
+SESSION_TIMEOUT = 86400  # 24 hours in seconds (increased from 1 hour)
 
 # Grading Configuration
 GRADING_CONFIG = {
