@@ -46,7 +46,7 @@ def grade_all(debug=False, user_id=None):
                             debug_grading(student_answer, sample, rules)
                             
                         feedback = calculate_similarity_with_feedback(
-                            student_answer, sample, rules, grade_thresholds=grade_thresholds
+                            student_answer, sample, rules, grade_thresholds=grade_thresholds, debug=debug
                         )
                         
                         results.append({

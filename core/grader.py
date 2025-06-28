@@ -1,9 +1,25 @@
 from sentence_transformers import SentenceTransformer, util
 import re
+import nltk
 from nltk.stem import WordNetLemmatizer
 
+# Download NLTK data if not available
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet')
+
+try:
+    lemmatizer = WordNetLemmatizer()
+except Exception as e:
+    print(f"Warning: Could not initialize WordNet lemmatizer: {e}")
+    # Fallback lemmatizer
+    class FallbackLemmatizer:
+        def lemmatize(self, word):
+            return word.lower()
+    lemmatizer = FallbackLemmatizer()
+
 model = SentenceTransformer('all-MiniLM-L6-v2')
-lemmatizer = WordNetLemmatizer()
 
 def assign_grade(score, grade_thresholds=None):
     """
@@ -94,7 +110,7 @@ def extract_important_content(text):
     
     return important_words
 
-def match_rule(student_answer, rule_text, rule_type="semantic", threshold=0.2):
+def match_rule(student_answer, rule_text, rule_type="semantic", threshold=0.2, debug=False):
     """Match a rule based on its type with completely dynamic matching"""
     
     if rule_type == "exact_phrase":
@@ -144,21 +160,62 @@ def match_rule(student_answer, rule_text, rule_type="semantic", threshold=0.2):
             # If no important words found, fall back to semantic matching
             return calculate_semantic_similarity(student_answer, rule_text, threshold)
         
-        # Check overlap between rule and student words
+        # First, try exact phrase matching for multi-word terms
+        rule_lower = rule_text.lower()
+        student_lower = student_answer.lower()
+        
+        # Extract key phrases from the rule (after instruction words)
+        instruction_patterns = [
+            r'contains?\s+(?:the\s+)?(.+)',
+            r'has\s+(?:the\s+)?(.+)',
+            r'includes?\s+(?:the\s+)?(.+)',
+            r'keywords?\s+(?:are\s+)?(.+)',
+            r'terms?\s+(?:are\s+)?(.+)'
+        ]
+        
+        key_phrases = []
+        for pattern in instruction_patterns:
+            matches = re.findall(pattern, rule_lower)
+            for match in matches:
+                phrase = match.strip().rstrip('.')
+                if len(phrase) > 2:
+                    key_phrases.append(phrase)
+        
+        # If we found specific phrases, check for exact matches first
+        if key_phrases:
+            for phrase in key_phrases:
+                if phrase in student_lower:
+                    return True, 1.0
+        
+        # Debug: Print what we're looking for
+        if debug:
+            print(f"  Keyword rule '{rule_text}' extracted phrases: {key_phrases}")
+            print(f"  Student answer: '{student_lower}'")
+            print(f"  No exact phrase match found")
+        
+        # If no exact phrase match, fall back to word-level matching
+        # But be more strict - require higher overlap
         overlap = len(student_important.intersection(rule_important))
         score = overlap / len(rule_important) if rule_important else 0
         
-        # More flexible matching: require at least 50% of important words
-        # OR if we have a high overlap score (>= 0.6)
-        required_words = max(1, len(rule_important) * 0.5)  # At least 50% of words
+        # Debug: Print word-level matching info
+        if debug:
+            print(f"  Word-level matching - Rule words: {rule_important}")
+            print(f"  Word-level matching - Student words: {student_important}")
+            print(f"  Overlap: {student_important.intersection(rule_important)}")
+            print(f"  Overlap score: {score:.2f}")
+        
+        # More strict matching: require at least 80% of important words
+        # OR if we have a very high overlap score (>= 0.8)
+        required_words = max(1, len(rule_important) * 0.8)  # At least 80% of words
         words_present = overlap >= required_words
         
-        # Also consider it a match if we have high semantic similarity
-        if not words_present and score >= 0.6:
+        # Also consider it a match if we have very high semantic similarity
+        if not words_present and score >= 0.8:
             words_present = True
         
-        # Additional flexibility: if we have at least 2 words matching, consider it a match
-        if not words_present and overlap >= 2:
+        # Additional flexibility: if we have at least 3 words matching, consider it a match
+        if not words_present and overlap >= 3:
             words_present = True
         
         return words_present, score
@@ -222,7 +279,7 @@ def debug_grading(student_answer, sample, rules):
             print(f"  Important Student Words: {student_important}")
             print(f"  Overlap: {student_important.intersection(rule_important)}")
 
-def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=0.2, grade_thresholds=None):
+def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=0.2, grade_thresholds=None, debug=False):
     student_emb = model.encode(student_answer, convert_to_tensor=True)
     sample_emb = model.encode(sample, convert_to_tensor=True)
     sample_score = util.cos_sim(student_emb, sample_emb).item()
@@ -242,7 +299,7 @@ def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=
             elif any(word in rule_lower for word in ["contains", "has", "includes"]):
                 rule_type = "contains_keywords"
         
-        is_matched, rule_score = match_rule(student_answer, rule_text, rule_type, threshold)
+        is_matched, rule_score = match_rule(student_answer, rule_text, rule_type, threshold, debug)
         rule_scores.append(rule_score)
         
         if is_matched:
@@ -250,9 +307,20 @@ def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=
         else:
             missed.append(rule_text)
 
-    sample_weight = 0.6
-    rule_weight = 0.4 / len(rules) if rules else 0
-    final_score = sample_score * sample_weight + sum(r * rule_weight for r in rule_scores)
+    # Calculate rule-based score (primary scoring method)
+    if rules:
+        rule_score = len(matched) / len(rules)  # Percentage of rules matched
+    else:
+        rule_score = 0
+    
+    # Use sample similarity as a bonus/penalty (secondary scoring method)
+    sample_bonus = max(0, (sample_score - 0.5) * 0.2)  # Small bonus for good sample similarity
+    
+    # Final score: primarily rule-based with small sample bonus
+    final_score = rule_score + sample_bonus
+    
+    # Cap the score at 1.0
+    final_score = min(1.0, final_score)
 
     return {
         "score": final_score,

@@ -4,3 +4,4 @@ sentence-transformers
 bcrypt
 python-dotenv
 PyJWT
+nltk
