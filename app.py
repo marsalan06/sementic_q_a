@@ -829,27 +829,78 @@ def main_app():
         with tab4:
             st.subheader("🗑️ Bulk Operations")
             st.warning("⚠️ **Danger Zone** - These operations cannot be undone!")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🗑️ Clear All Student Answers", type="secondary"):
-                    if st.checkbox("I understand this will delete ALL student answers"):
+            
+            # Show current counts
+            try:
+                db = get_db()
+                answers_count = db.answers.count_documents({"user_id": st.session_state.user["_id"]})
+                grades_count = db.grades.count_documents({"user_id": st.session_state.user["_id"]})
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("📝 Current Student Answers", answers_count)
+                with col2:
+                    st.metric("📊 Current Grades", grades_count)
+                
+                if answers_count == 0 and grades_count == 0:
+                    st.info("ℹ️ No data to delete. You can safely skip bulk operations.")
+                else:
+                    st.info("💡 **Tip**: Consider exporting your data before performing bulk deletions.")
+            except Exception as e:
+                st.error(f"❌ Error checking data counts: {str(e)}")
+            
+            st.divider()
+            
+            # Clear Student Answers
+            st.write("**🗑️ Clear All Student Answers**")
+            confirm_answers = st.checkbox("I understand this will delete ALL student answers", key="confirm_answers_bulk")
+            with st.form("clear_answers_form_bulk"):
+                clear_answers_submitted = st.form_submit_button("🗑️ Clear All Student Answers", disabled=not confirm_answers)
+                if clear_answers_submitted:
+                    if confirm_answers:
                         with st.spinner("Clearing all student answers..."):
                             try:
                                 db = get_db()
-                                result = db.answers.delete_many({"user_id": st.session_state.user["_id"]})
-                                st.success(f"✅ Deleted {result.deleted_count} student answers")
+                                count = db.answers.count_documents({"user_id": st.session_state.user["_id"]})
+                                if count == 0:
+                                    st.info("ℹ️ No student answers found to delete")
+                                else:
+                                    result = db.answers.delete_many({"user_id": st.session_state.user["_id"]})
+                                    st.success(f"✅ Deleted {result.deleted_count} student answers")
+                                    if 'grading_results' in st.session_state:
+                                        del st.session_state.grading_results
                             except Exception as e:
                                 st.error(f"❌ Error: {str(e)}")
-            with col2:
-                if st.button("🗑️ Clear All Grades", type="secondary"):
-                    if st.checkbox("I understand this will delete ALL grading results"):
+                                st.error("Please check your database connection and try again.")
+                    else:
+                        st.error("Please check the box to enable deletion.")
+            
+            st.divider()
+            
+            # Clear Grades
+            st.write("**🗑️ Clear All Grades**")
+            confirm_grades = st.checkbox("I understand this will delete ALL grading results", key="confirm_grades_bulk")
+            with st.form("clear_grades_form_bulk"):
+                clear_grades_submitted = st.form_submit_button("🗑️ Clear All Grades", disabled=not confirm_grades)
+                if clear_grades_submitted:
+                    if confirm_grades:
                         with st.spinner("Clearing all grades..."):
                             try:
                                 db = get_db()
-                                result = db.grades.delete_many({"user_id": st.session_state.user["_id"]})
-                                st.success(f"✅ Deleted {result.deleted_count} grades")
+                                count = db.grades.count_documents({"user_id": st.session_state.user["_id"]})
+                                if count == 0:
+                                    st.info("ℹ️ No grades found to delete")
+                                else:
+                                    result = db.grades.delete_many({"user_id": st.session_state.user["_id"]})
+                                    st.success(f"✅ Deleted {result.deleted_count} grades")
+                                    if 'grading_results' in st.session_state:
+                                        del st.session_state.grading_results
                             except Exception as e:
                                 st.error(f"❌ Error: {str(e)}")
+                                st.error("Please check your database connection and try again.")
+                    else:
+                        st.error("Please check the box to enable deletion.")
+            
             st.info("""
             **🗑️ Bulk Operations:**
             - **Clear Student Answers**: Remove all student submissions
