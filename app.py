@@ -1,7 +1,8 @@
 import streamlit as st
-from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds
+from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db
 from services.grading_service import grade_all
 from services.auth_service import create_user, authenticate_user, create_session_token, verify_session_token, get_user_by_id, refresh_session_token, get_session_info
+from services.import_export_service import ImportExportService
 from bson.objectid import ObjectId
 import json
 import pickle
@@ -9,6 +10,10 @@ import base64
 import time
 import os
 import tempfile
+import csv
+import io
+import zipfile
+from datetime import datetime
 
 st.set_page_config(page_title="Semantic Grader", layout="wide")
 
@@ -423,7 +428,7 @@ def main_app():
             logout()
     
     # Navigation
-    page = st.sidebar.selectbox("Navigation", ["Create Question", "Upload Answers", "Grade Settings", "Run Grading"])
+    page = st.sidebar.selectbox("Navigation", ["Create Question", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
     
     if page == "Create Question":
         st.header("📝 Create a New Question")
@@ -731,6 +736,128 @@ def main_app():
                     st.write(r["missed_rules"])
         else:
             st.info("No graded results available. Run grading first.")
+
+    elif page == "Data Management":
+        st.header("📋 Data Management")
+        import_export_service = ImportExportService(st.session_state.user["_id"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📤 Export All Data", "📥 Import Answers", "📋 Template", "🗑️ Bulk Operations"])
+
+        with tab1:
+            st.subheader("📤 Export All Data (CSV ZIP)")
+            if st.button("📤 Export All Data as ZIP"):
+                with st.spinner("Exporting all data as CSV ZIP..."):
+                    # Export each as CSV
+                    success_q, questions_csv = import_export_service.export_questions_to_csv()
+                    success_a, answers_csv = import_export_service.export_student_answers_to_csv()
+                    success_g, grades_csv = import_export_service.export_grades_to_csv()
+                    if success_q and success_a and success_g:
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w") as zf:
+                            zf.writestr("questions.csv", questions_csv)
+                            zf.writestr("answers.csv", answers_csv)
+                            zf.writestr("grades.csv", grades_csv)
+                        zip_buffer.seek(0)
+                        st.success("✅ All data exported successfully!")
+                        st.download_button(
+                            label="📥 Download All Data (CSV ZIP)",
+                            data=zip_buffer,
+                            file_name="semantic_grader_data.zip",
+                            mime="application/zip"
+                        )
+                    else:
+                        st.error("❌ Failed to export all data. Please ensure you have questions, answers, and grades.")
+
+        with tab2:
+            st.subheader("📥 Import Student Answers (CSV)")
+            questions = get_questions(st.session_state.user["_id"])
+            if questions:
+                question_options = {q["question"][:50] + "...": str(q["_id"]) for q in questions}
+                selected_question = st.selectbox(
+                    "Select question for these answers:",
+                    options=list(question_options.keys()),
+                    help="Choose which question these student answers belong to"
+                )
+                selected_question_id = question_options[selected_question]
+                uploaded_file = st.file_uploader(
+                    "Upload Student Answers CSV",
+                    type=["csv"],
+                    help="Upload a CSV file containing student answers"
+                )
+                if uploaded_file and st.button("📥 Import Answers"):
+                    with st.spinner("Importing student answers..."):
+                        try:
+                            file_content = uploaded_file.read().decode('utf-8')
+                            success, message, errors = import_export_service.import_student_answers_from_csv(file_content, selected_question_id)
+                            if success:
+                                st.success(f"✅ {message}")
+                                if errors:
+                                    st.warning(f"⚠️ {len(errors)} errors occurred:")
+                                    for error in errors[:5]:
+                                        st.write(f"• {error}")
+                                    if len(errors) > 5:
+                                        st.write(f"• ... and {len(errors) - 5} more errors")
+                            else:
+                                st.error(f"❌ {message}")
+                        except Exception as e:
+                            st.error(f"❌ Import failed: {str(e)}")
+            else:
+                st.warning("⚠️ No questions found. Please create a question first.")
+
+        with tab3:
+            st.subheader("📋 Student Answers Template (CSV)")
+            templates = import_export_service.get_export_templates()
+            answers_template = templates['student_answers']
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(answers_template['headers'])
+            writer.writerow(answers_template['example'])
+            st.download_button(
+                label="📥 Download Answers Template",
+                data=output.getvalue(),
+                file_name="student_answers_template.csv",
+                mime="text/csv"
+            )
+            st.code(output.getvalue())
+            st.info("""
+            **Instructions:**
+            1. Download the template
+            2. Fill in your data following the format
+            3. Save as CSV
+            4. Upload using the Import tab
+            """)
+
+        with tab4:
+            st.subheader("🗑️ Bulk Operations")
+            st.warning("⚠️ **Danger Zone** - These operations cannot be undone!")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🗑️ Clear All Student Answers", type="secondary"):
+                    if st.checkbox("I understand this will delete ALL student answers"):
+                        with st.spinner("Clearing all student answers..."):
+                            try:
+                                db = get_db()
+                                result = db.answers.delete_many({"user_id": st.session_state.user["_id"]})
+                                st.success(f"✅ Deleted {result.deleted_count} student answers")
+                            except Exception as e:
+                                st.error(f"❌ Error: {str(e)}")
+            with col2:
+                if st.button("🗑️ Clear All Grades", type="secondary"):
+                    if st.checkbox("I understand this will delete ALL grading results"):
+                        with st.spinner("Clearing all grades..."):
+                            try:
+                                db = get_db()
+                                result = db.grades.delete_many({"user_id": st.session_state.user["_id"]})
+                                st.success(f"✅ Deleted {result.deleted_count} grades")
+                            except Exception as e:
+                                st.error(f"❌ Error: {str(e)}")
+            st.info("""
+            **🗑️ Bulk Operations:**
+            - **Clear Student Answers**: Remove all student submissions
+            - **Clear Grades**: Remove all grading results
+            
+            **⚠️ Warning**: These operations are permanent and cannot be undone!
+            Consider exporting your data before performing bulk deletions.
+            """)
 
 # Initialize session state with persistence
 if 'user' not in st.session_state:

@@ -33,11 +33,17 @@ def grade_all(debug=False, user_id=None):
                     continue
 
                 # Filter answers for this question
-                question_answers = [a for a in answers if a.get("question_id") == qid]
+                question_answers = [a for a in answers if str(a.get("question_id")) == qid]
+                
+                if debug:
+                    print(f"Question {qid}: Found {len(question_answers)} answers")
+                    for a in question_answers:
+                        print(f"  - {a.get('student_name', 'Unknown')}: {a.get('student_ans', a.get('student_answer', 'No answer'))[:50]}...")
                 
                 for student in question_answers:
                     try:
-                        student_answer = student.get("student_ans", "")
+                        # Handle both field name variations in the database
+                        student_answer = student.get("student_ans", student.get("student_answer", ""))
                         if not student_answer:
                             print(f"Warning: Empty student answer for {student.get('student_name', 'Unknown')}")
                             continue

@@ -161,6 +161,18 @@ def get_student_answers(user_id):
         print(f"Error getting student answers: {e}")
         return []
 
+def get_grades(user_id):
+    """Get grades for a specific user"""
+    try:
+        if not user_id:
+            return []
+        
+        grades = list(db.grades.find({"user_id": user_id}))
+        return grades
+    except Exception as e:
+        print(f"Error getting grades: {e}")
+        return []
+
 def save_grades(grades, user_id):
     """Save grades with validation"""
     try:
