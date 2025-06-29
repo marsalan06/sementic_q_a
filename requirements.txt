@@ -1,5 +1,6 @@
 streamlit
 pymongo
+certifi
 sentence-transformers
 bcrypt
 python-dotenv
