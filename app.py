@@ -15,7 +15,7 @@ import io
 import zipfile
 from datetime import datetime
 
-st.set_page_config(page_title="Semantic Grader", layout="wide")
+st.set_page_config(page_title="Scorix", layout="wide")
 
 # Session file path
 SESSION_FILE = os.path.join(tempfile.gettempdir(), "semantic_grader_session.pkl")
@@ -291,7 +291,7 @@ def auto_refresh_session():
 
 def login_page():
     """Login page"""
-    st.title("🔐 Login to Semantic Grader")
+    st.title("🔐 Login to Scorix")
     
     # Check if there's a recoverable session
     persistent_session = get_persistent_session()
@@ -393,7 +393,7 @@ def main_app():
     # Header with user info and logout
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
-        st.title("🎓 Semantic Grader")
+        st.title("🎓 Scorix")
     with col2:
         st.write(f"**Welcome, {st.session_state.user['username']}!**")
         
@@ -481,10 +481,25 @@ def main_app():
 
         selected_question_id = str(questions[selected_index]["_id"])
 
+        # Standards/info box for answer submission
+        st.info("""
+        **Answer Submission Standards:**
+        - **Maximum answer length:** 4,000 characters (about 600–800 words)
+        - **Matching criteria:**
+            - 🔍 *Exact phrases*: Include any required formulas or specific wording.
+            - 🔑 *Keywords*: Make sure to mention all required terms.
+            - 🧠 *Semantic understanding*: Clearly explain concepts and relationships.
+        - **Assessment uncertainty:** Automated grading is not perfect. Borderline or ambiguous answers may require manual review.
+        - **General standards:**
+            - Be clear, concise, and relevant.
+            - Address all parts of the question.
+            - Avoid unnecessary information.
+        """)
+
         with st.form(key="answer_form"):
             name = st.text_input("Student Name")
             roll_no = st.text_input("Student Roll No")
-            answer = st.text_area("Student Answer")
+            answer = st.text_area("Student Answer", max_chars=4000)
             submitted = st.form_submit_button("Submit Answer")
 
         if submitted:
@@ -771,6 +786,20 @@ def main_app():
             st.subheader("📥 Import Student Answers (CSV)")
             questions = get_questions(st.session_state.user["_id"])
             if questions:
+                # Standards/info box for answer import
+                st.info("""
+                **Answer Submission Standards:**
+                - **Maximum answer length:** 4,000 characters (about 600–800 words)
+                - **Matching criteria:**
+                    - 🔍 *Exact phrases*: Include any required formulas or specific wording.
+                    - 🔑 *Keywords*: Make sure to mention all required terms.
+                    - 🧠 *Semantic understanding*: Clearly explain concepts and relationships.
+                - **Assessment uncertainty:** Automated grading is not perfect. Borderline or ambiguous answers may require manual review.
+                - **General standards:**
+                    - Be clear, concise, and relevant.
+                    - Address all parts of the question.
+                    - Avoid unnecessary information.
+                """)
                 question_options = {q["question"][:50] + "...": str(q["_id"]) for q in questions}
                 selected_question = st.selectbox(
                     "Select question for these answers:",

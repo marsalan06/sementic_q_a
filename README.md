@@ -1,4 +1,4 @@
-# 🎓 Semantic Grader MVP
+# 🎓 Scorix MVP
 
 A dynamic, AI-powered grading system that uses semantic analysis to automatically grade student answers with customizable rules and user authentication.
 
