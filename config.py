@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database Configuration
-MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "semantic_grader"
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("DB_NAME")
 
 # Security Configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
