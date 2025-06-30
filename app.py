@@ -1,5 +1,5 @@
 import streamlit as st
-from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db
+from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db, get_student_answers, get_grades
 from services.grading_service import grade_all
 from services.auth_service import create_user, authenticate_user, create_session_token, verify_session_token, get_user_by_id, refresh_session_token, get_session_info
 from services.import_export_service import ImportExportService
@@ -729,28 +729,164 @@ def main_app():
                 else:
                     st.warning("⚠️ No results to save. Please ensure you have questions and student answers.")
                     st.session_state.grading_results = []
-
-        st.subheader("📊 Grading Results")
         
-        # Use stored results if available, otherwise run grading once
-        if st.session_state.grading_results is not None:
-            graded = st.session_state.grading_results
-        else:
-            with st.spinner("Loading grading results..."):
-                graded = grade_all(debug=debug_mode, user_id=st.session_state.user["_id"])
+        st.divider()
+        st.subheader("📚 Questions and Student Answers Overview")
         
-        if graded:
-            for i, r in enumerate(graded):
-                with st.expander(f"{r['student_name']} ({r['student_roll_no']}) - Grade: {r['grade']}"):
-                    st.markdown(f"**Student Answer:**")
-                    st.text_area("Answer", value=r.get('student_answer', 'No answer available'), height=100, disabled=True, key=f"answer_{i}_{r['student_roll_no']}")
-                    st.markdown(f"**Correct %:** {r['correct_%']}")
-                    st.markdown("✅ **Matched Rules:**")
-                    st.write(r["matched_rules"])
-                    st.markdown("❌ **Missed Rules:**")
-                    st.write(r["missed_rules"])
+        # Get questions and their associated data
+        questions = get_questions(st.session_state.user["_id"])
+        answers = get_student_answers(st.session_state.user["_id"])
+        grades = get_grades(st.session_state.user["_id"])
+        
+        if not questions:
+            st.info("ℹ️ No questions found. Create a question first to see student answers and grades.")
         else:
-            st.info("No graded results available. Run grading first.")
+            # Add dropdown to select question
+            question_options = {q["question"][:80] + ("..." if len(q["question"]) > 80 else ""): str(q["_id"]) for q in questions}
+            selected_question_text = st.selectbox(
+                "Select a question to view:",
+                options=list(question_options.keys()),
+                help="Choose which question's answers and grades to display"
+            )
+            selected_question_id = question_options[selected_question_text]
+            
+            # Only show the selected question
+            for question in questions:
+                question_id = str(question["_id"])
+                if question_id != selected_question_id:
+                    continue
+                question_text = question["question"]
+                
+                # Filter answers for this question
+                question_answers = [a for a in answers if str(a.get("question_id")) == question_id]
+                
+                # Filter grades for this question
+                question_grades = [g for g in grades if str(g.get("question_id")) == question_id]
+                
+                # Create a mapping of student answers to grades
+                grades_dict = {g.get("student_roll_no"): g for g in question_grades}
+                
+                # Display question header
+                st.markdown(f"### 📝 **Question:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}")
+                
+                # Show question details in an expander
+                with st.expander(f"📋 Question Details & Sample Answer", expanded=False):
+                    st.markdown(f"**Full Question:**")
+                    st.write(question_text)
+                    
+                    if question.get("sample_answer"):
+                        st.markdown(f"**Sample Answer:**")
+                        st.write(question["sample_answer"])
+                    
+                    if question.get("marking_scheme"):
+                        st.markdown(f"**Marking Rules:**")
+                        for i, rule in enumerate(question["marking_scheme"], 1):
+                            rule_text = rule.get("text", "")
+                            rule_type = rule.get("type", "semantic")
+                            icons = {
+                                "exact_phrase": "🔍",
+                                "contains_keywords": "🔑", 
+                                "semantic": "🧠"
+                            }
+                            st.write(f"{i}. {rule_text} {icons.get(rule_type, '🧠')}")
+                
+                # Show student answers count
+                st.markdown(f"**📊 Student Answers:** {len(question_answers)}")
+                
+                if question_answers:
+                    # Group answers by grade if grades exist
+                    if question_grades:
+                        # Create grade categories
+                        grade_categories = {
+                            "A": [], "B": [], "C": [], "D": [], "F": []
+                        }
+                        
+                        for answer in question_answers:
+                            roll_no = answer.get("student_roll_no")
+                            grade_info = grades_dict.get(roll_no)
+                            
+                            if grade_info:
+                                grade = grade_info.get("grade", "F")
+                                grade_categories[grade].append({
+                                    "answer": answer,
+                                    "grade_info": grade_info
+                                })
+                            else:
+                                grade_categories["F"].append({
+                                    "answer": answer,
+                                    "grade_info": None
+                                })
+                        
+                        # Display answers grouped by grade
+                        for grade in ["A", "B", "C", "D", "F"]:
+                            grade_answers = grade_categories[grade]
+                            if grade_answers:
+                                grade_color = {
+                                    "A": "🟢", "B": "🟡", "C": "🟠", 
+                                    "D": "🔴", "F": "⚫"
+                                }
+                                
+                                st.markdown(f"**{grade_color.get(grade, '⚫')} Grade {grade} ({len(grade_answers)} students):**")
+                                
+                                for item in grade_answers:
+                                    answer = item["answer"]
+                                    grade_info = item["grade_info"]
+                                    
+                                    student_name = answer.get("student_name", "Unknown")
+                                    student_roll = answer.get("student_roll_no", "Unknown")
+                                    student_answer = answer.get("student_ans", answer.get("student_answer", "No answer"))
+                                    
+                                    # Create expander for each student
+                                    expander_title = f"{student_name} ({student_roll})"
+                                    if grade_info:
+                                        expander_title += f" - {grade_info.get('correct_%', 'N/A')} - Grade {grade}"
+                                    
+                                    with st.expander(expander_title, expanded=False):
+                                        st.markdown("**Student Answer:**")
+                                        st.text_area(
+                                            "Answer", 
+                                            value=student_answer, 
+                                            height=100, 
+                                            disabled=True, 
+                                            key=f"answer_{question_id}_{student_roll}"
+                                        )
+                                        
+                                        if grade_info:
+                                            st.markdown(f"**Score:** {grade_info.get('correct_%', 'N/A')}")
+                                            st.markdown(f"**Grade:** {grade}")
+                                            
+                                            if grade_info.get("matched_rules"):
+                                                st.markdown("✅ **Matched Rules:**")
+                                                st.write(grade_info["matched_rules"])
+                                            
+                                            if grade_info.get("missed_rules"):
+                                                st.markdown("❌ **Missed Rules:**")
+                                                st.write(grade_info["missed_rules"])
+                                        else:
+                                            st.info("⚠️ No grading data available for this student")
+                    else:
+                        # No grades available, show all answers
+                        st.markdown("**📝 Student Answers (No grades available):**")
+                        
+                        for answer in question_answers:
+                            student_name = answer.get("student_name", "Unknown")
+                            student_roll = answer.get("student_roll_no", "Unknown")
+                            student_answer = answer.get("student_ans", answer.get("student_answer", "No answer"))
+                            
+                            with st.expander(f"{student_name} ({student_roll})", expanded=False):
+                                st.markdown("**Student Answer:**")
+                                st.text_area(
+                                    "Answer", 
+                                    value=student_answer, 
+                                    height=100, 
+                                    disabled=True, 
+                                    key=f"answer_{question_id}_{student_roll}"
+                                )
+                                st.info("⚠️ No grading data available. Run grading to see scores and grades.")
+                else:
+                    st.info("ℹ️ No student answers for this question yet.")
+                
+                st.divider()
 
     elif page == "Data Management":
         st.header("📋 Data Management")
