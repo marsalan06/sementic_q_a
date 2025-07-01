@@ -1,6 +1,7 @@
 import streamlit as st
-from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db, get_student_answers, get_grades
+from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db, get_student_answers, get_grades, save_test, get_tests, get_test_by_id, delete_test, save_test_answer, get_test_answers, save_test_grades, get_test_grades, clear_test_grades
 from services.grading_service import grade_all
+from services.test_grading_service import grade_test, get_test_statistics
 from services.auth_service import create_user, authenticate_user, create_session_token, verify_session_token, get_user_by_id, refresh_session_token, get_session_info
 from services.import_export_service import ImportExportService
 from bson.objectid import ObjectId
@@ -428,7 +429,7 @@ def main_app():
             logout()
     
     # Navigation
-    page = st.sidebar.selectbox("Navigation", ["Create Question", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
+    page = st.sidebar.selectbox("Navigation", ["Create Question", "Test Management", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
     
     if page == "Create Question":
         st.header("📝 Create a New Question")
@@ -467,6 +468,346 @@ def main_app():
                     del st.session_state.grading_results
             else:
                 st.error(f"❌ {message}")
+
+    elif page == "Test Management":
+        st.header("📋 Test Management")
+        
+        # Create tabs for different test operations
+        tab1, tab2, tab3, tab4 = st.tabs(["📝 Create Test", "📊 Test Overview", "📤 Upload Test Answers", "🎯 Grade Tests"])
+        
+        with tab1:
+            st.subheader("📝 Create a New Test")
+            
+            # Get available questions
+            questions = get_questions(st.session_state.user["_id"])
+            if not questions:
+                st.warning("⚠️ No questions found. Please create questions first before creating a test.")
+            else:
+                with st.form("create_test_form"):
+                    test_name = st.text_input("Test Name", placeholder="e.g., Physics Midterm Exam")
+                    test_description = st.text_area("Test Description (Optional)", placeholder="Brief description of the test...")
+                    
+                    st.subheader("📋 Select Questions for this Test")
+                    st.info("💡 Select the questions you want to include in this test. Students will need to answer all selected questions.")
+                    
+                    # Display questions with checkboxes
+                    selected_questions = []
+                    for i, question in enumerate(questions):
+                        question_text = question["question"]
+                        question_id = str(question["_id"])
+                        
+                        # Create a unique key for each checkbox
+                        checkbox_key = f"question_{question_id}"
+                        if st.checkbox(f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", key=checkbox_key):
+                            selected_questions.append(question_id)
+                    
+                    st.write(f"**Selected Questions:** {len(selected_questions)}")
+                    
+                    submitted = st.form_submit_button("💾 Create Test")
+                    
+                    if submitted:
+                        if not test_name:
+                            st.error("❌ Test name is required")
+                        elif not selected_questions:
+                            st.error("❌ Please select at least one question")
+                        else:
+                            success, message = save_test(test_name, test_description, selected_questions, st.session_state.user["_id"])
+                            if success:
+                                st.success(f"✅ {message}")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
+        
+        with tab2:
+            st.subheader("📊 Test Overview")
+            
+            tests = get_tests(st.session_state.user["_id"])
+            if not tests:
+                st.info("ℹ️ No tests created yet. Create your first test in the 'Create Test' tab.")
+            else:
+                # Display tests in a table format
+                for test in tests:
+                    test_id = str(test["_id"])
+                    test_name = test["test_name"]
+                    test_description = test.get("test_description", "")
+                    question_count = len(test.get("question_ids", []))
+                    created_at = test.get("created_at", "")
+                    
+                    # Get test statistics
+                    test_answers = get_test_answers(st.session_state.user["_id"], test_id)
+                    test_grades = get_test_grades(st.session_state.user["_id"], test_id)
+                    
+                    with st.expander(f"📋 {test_name} ({question_count} questions)", expanded=False):
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            st.write(f"**Description:** {test_description or 'No description'}")
+                            st.write(f"**Created:** {created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'}")
+                            st.write(f"**Status:** {'🟢 Active' if test.get('is_active', True) else '🔴 Inactive'}")
+                        
+                        with col2:
+                            st.metric("📝 Submissions", len(test_answers))
+                            st.metric("📊 Graded", len(test_grades))
+                        
+                        # Show questions in this test
+                        st.subheader("📋 Questions in this Test")
+                        question_ids = test.get("question_ids", [])
+                        for i, qid in enumerate(question_ids, 1):
+                            question = next((q for q in questions if str(q["_id"]) == qid), None)
+                            if question:
+                                st.write(f"**Q{i}:** {question['question'][:100]}{'...' if len(question['question']) > 100 else ''}")
+                        
+                        # Action buttons
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            # Handle delete with confirmation using session state
+                            delete_key = f"delete_{test_id}"
+                            confirm_key = f"confirm_delete_{test_id}"
+                            
+                            if delete_key not in st.session_state:
+                                st.session_state[delete_key] = False
+                            if confirm_key not in st.session_state:
+                                st.session_state[confirm_key] = False
+                            
+                            if not st.session_state[delete_key]:
+                                if st.button("🗑️ Delete Test", key=f"btn_{delete_key}"):
+                                    st.session_state[delete_key] = True
+                                    st.rerun()
+                            else:
+                                st.warning("⚠️ Are you sure you want to delete this test?")
+                                col_confirm1, col_confirm2 = st.columns(2)
+                                with col_confirm1:
+                                    if st.button("✅ Yes, Delete", key=f"btn_{confirm_key}"):
+                                        st.info(f"Deleting test {test_id}...")
+                                        success, message = delete_test(test_id, st.session_state.user["_id"])
+                                        if success:
+                                            st.success(f"✅ {message}")
+                                            # Clear session state
+                                            st.session_state[delete_key] = False
+                                            st.session_state[confirm_key] = False
+                                            st.rerun()
+                                        else:
+                                            st.error(f"❌ {message}")
+                                            st.session_state[delete_key] = False
+                                            st.session_state[confirm_key] = False
+                                with col_confirm2:
+                                    if st.button("❌ Cancel", key=f"btn_cancel_{test_id}"):
+                                        st.session_state[delete_key] = False
+                                        st.session_state[confirm_key] = False
+                                        st.rerun()
+                        
+                        with col2:
+                            if len(test_answers) > 0:
+                                if st.button("📊 View Results", key=f"results_{test_id}"):
+                                    st.session_state.selected_test_id = test_id
+                                    st.session_state.show_test_results = True
+                                    st.rerun()
+                        
+                        with col3:
+                            if len(test_answers) > 0 and len(test_grades) == 0:
+                                if st.button("🎯 Grade Test", key=f"grade_{test_id}"):
+                                    st.session_state.selected_test_id = test_id
+                                    st.session_state.grade_test = True
+                                    st.rerun()
+        
+        with tab3:
+            st.subheader("📤 Upload Test Answers")
+            
+            tests = get_tests(st.session_state.user["_id"])
+            if not tests:
+                st.warning("⚠️ No tests found. Please create a test first.")
+            else:
+                # Select test
+                test_options = {test["test_name"]: str(test["_id"]) for test in tests}
+                selected_test_name = st.selectbox(
+                    "Select a test:",
+                    options=list(test_options.keys()),
+                    help="Choose which test to upload answers for"
+                )
+                selected_test_id = test_options[selected_test_name]
+                
+                # Get test details
+                test = get_test_by_id(selected_test_id, st.session_state.user["_id"])
+                if test:
+                    st.info(f"📋 **Test:** {test['test_name']}")
+                    st.write(f"**Questions:** {len(test.get('question_ids', []))}")
+                    
+                    # Manual entry form
+                    st.subheader("📝 Manual Entry")
+                    with st.form("manual_test_answer_form"):
+                        student_name = st.text_input("Student Name")
+                        student_roll_no = st.text_input("Student Roll No")
+                        
+                        st.subheader("📝 Answer Each Question")
+                        question_answers = {}
+                        question_ids = test.get("question_ids", [])
+                        
+                        for i, qid in enumerate(question_ids, 1):
+                            question = next((q for q in questions if str(q["_id"]) == qid), None)
+                            if question:
+                                question_text = question["question"]
+                                answer = st.text_area(
+                                    f"Q{i}: {question_text[:100]}{'...' if len(question_text) > 100 else ''}",
+                                    max_chars=4000,
+                                    key=f"test_answer_{qid}"
+                                )
+                                question_answers[qid] = answer
+                        
+                        submitted = st.form_submit_button("💾 Submit Test Answer")
+                        
+                        if submitted:
+                            if not student_name or not student_roll_no:
+                                st.error("❌ Student name and roll number are required")
+                            else:
+                                success, message = save_test_answer(
+                                    student_name, student_roll_no, selected_test_id, 
+                                    question_answers, st.session_state.user["_id"]
+                                )
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                    
+                    # CSV upload
+                    st.subheader("📤 CSV Upload")
+                    st.info("💡 Upload a CSV file with student answers for this test.")
+                    
+                    uploaded_file = st.file_uploader(
+                        "Upload Test Answers CSV",
+                        type=["csv"],
+                        help="Upload a CSV file containing test answers"
+                    )
+                    
+                    if uploaded_file and st.button("📥 Import Test Answers"):
+                        with st.spinner("Importing test answers..."):
+                            try:
+                                file_content = uploaded_file.read().decode('utf-8')
+                                import_export_service = ImportExportService(st.session_state.user["_id"])
+                                success, message, errors = import_export_service.import_test_answers_from_csv(file_content, selected_test_id)
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    if errors:
+                                        st.warning(f"⚠️ {len(errors)} errors occurred:")
+                                        for error in errors[:5]:
+                                            st.write(f"• {error}")
+                                        if len(errors) > 5:
+                                            st.write(f"• ... and {len(errors) - 5} more errors")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                            except Exception as e:
+                                st.error(f"❌ Import failed: {str(e)}")
+        
+        with tab4:
+            st.subheader("🎯 Grade Tests")
+            
+            tests = get_tests(st.session_state.user["_id"])
+            if not tests:
+                st.warning("⚠️ No tests found. Please create a test first.")
+            else:
+                # Select test to grade
+                test_options = {test["test_name"]: str(test["_id"]) for test in tests}
+                selected_test_name = st.selectbox(
+                    "Select a test to grade:",
+                    options=list(test_options.keys()),
+                    help="Choose which test to grade"
+                )
+                selected_test_id = test_options[selected_test_name]
+                
+                # Get test details and answers
+                test = get_test_by_id(selected_test_id, st.session_state.user["_id"])
+                test_answers = get_test_answers(st.session_state.user["_id"], selected_test_id)
+                test_grades = get_test_grades(st.session_state.user["_id"], selected_test_id)
+                
+                if test:
+                    st.info(f"📋 **Test:** {test['test_name']}")
+                    st.write(f"**Questions:** {len(test.get('question_ids', []))}")
+                    st.write(f"**Submissions:** {len(test_answers)}")
+                    st.write(f"**Already Graded:** {len(test_grades)}")
+                    
+                    if len(test_answers) == 0:
+                        st.warning("⚠️ No test answers found. Please upload answers first.")
+                    else:
+                        debug_mode = st.checkbox("Enable Debug Mode", help="Show detailed analysis of grading process")
+                        
+                        if st.button("🎯 Grade Test & Save Results"):
+                            with st.spinner("Running test grading analysis..."):
+                                # Clear existing grades for this test
+                                clear_success, clear_message = clear_test_grades(st.session_state.user["_id"], selected_test_id)
+                                if not clear_success:
+                                    st.warning(f"Warning: {clear_message}")
+                                
+                                # Run grading
+                                results = grade_test(selected_test_id, st.session_state.user["_id"], debug=debug_mode)
+                                
+                                if results:
+                                    # Save grades
+                                    save_success, save_message = save_test_grades(results, st.session_state.user["_id"])
+                                    if save_success:
+                                        st.success(f"✅ {save_message}")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {save_message}")
+                                else:
+                                    st.warning("⚠️ No results to save. Please ensure you have test answers.")
+                        
+                        # Show test statistics if available
+                        if len(test_grades) > 0:
+                            st.subheader("📊 Test Statistics")
+                            stats = get_test_statistics(selected_test_id, st.session_state.user["_id"])
+                            if stats:
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Total Students", stats["total_students"])
+                                with col2:
+                                    st.metric("Average Score", f"{stats['average_percentage']:.1f}%")
+                                with col3:
+                                    st.metric("Highest Score", f"{stats['max_score']*100:.1f}%")
+                                with col4:
+                                    st.metric("Lowest Score", f"{stats['min_score']*100:.1f}%")
+                                
+                                # Grade distribution
+                                st.subheader("📈 Grade Distribution")
+                                grade_dist = stats["grade_distribution"]
+                                for grade in ["A", "B", "C", "D", "F"]:
+                                    count = grade_dist.get(grade, 0)
+                                    percentage = (count / stats["total_students"]) * 100 if stats["total_students"] > 0 else 0
+                                    st.write(f"**Grade {grade}:** {count} students ({percentage:.1f}%)")
+        
+        # Handle test results view
+        if st.session_state.get('show_test_results', False) and st.session_state.get('selected_test_id'):
+            test_id = st.session_state.selected_test_id
+            test = get_test_by_id(test_id, st.session_state.user["_id"])
+            test_grades = get_test_grades(st.session_state.user["_id"], test_id)
+            
+            if test and test_grades:
+                st.subheader(f"📊 Test Results: {test['test_name']}")
+                
+                # Display results in a table
+                for grade in test_grades:
+                    student_name = grade.get("student_name", "Unknown")
+                    student_roll = grade.get("student_roll_no", "Unknown")
+                    overall_score = grade.get("overall_percentage", "0%")
+                    overall_grade = grade.get("overall_grade", "F")
+                    
+                    with st.expander(f"{student_name} ({student_roll}) - {overall_score} - Grade {overall_grade}", expanded=False):
+                        st.write(f"**Overall Score:** {overall_score}")
+                        st.write(f"**Overall Grade:** {overall_grade}")
+                        st.write(f"**Questions Answered:** {grade.get('answered_questions', 0)}/{grade.get('total_questions', 0)}")
+                        
+                        # Show question-wise breakdown
+                        st.subheader("📝 Question-wise Breakdown")
+                        question_details = grade.get("question_details", [])
+                        for i, q_detail in enumerate(question_details, 1):
+                            score = q_detail.get("score", 0) * 100
+                            q_grade = q_detail.get("grade", "F")
+                            st.write(f"**Q{i}:** {score:.1f}% (Grade {q_grade})")
+                
+                if st.button("🔙 Back to Test Management"):
+                    st.session_state.show_test_results = False
+                    st.session_state.selected_test_id = None
+                    st.rerun()
 
     elif page == "Upload Answers":
         st.header("📤 Upload Student Answers")
@@ -901,12 +1242,22 @@ def main_app():
                     success_q, questions_csv = import_export_service.export_questions_to_csv()
                     success_a, answers_csv = import_export_service.export_student_answers_to_csv()
                     success_g, grades_csv = import_export_service.export_grades_to_csv()
+                    success_t, tests_csv = import_export_service.export_tests_to_csv()
+                    success_ta, test_answers_csv = import_export_service.export_test_answers_to_csv()
+                    success_tg, test_grades_csv = import_export_service.export_test_grades_to_csv()
+                    
                     if success_q and success_a and success_g:
                         zip_buffer = io.BytesIO()
                         with zipfile.ZipFile(zip_buffer, "w") as zf:
                             zf.writestr("questions.csv", questions_csv)
                             zf.writestr("answers.csv", answers_csv)
                             zf.writestr("grades.csv", grades_csv)
+                            if success_t:
+                                zf.writestr("tests.csv", tests_csv)
+                            if success_ta:
+                                zf.writestr("test_answers.csv", test_answers_csv)
+                            if success_tg:
+                                zf.writestr("test_grades.csv", test_grades_csv)
                         zip_buffer.seek(0)
                         st.success("✅ All data exported successfully!")
                         st.download_button(
@@ -969,8 +1320,11 @@ def main_app():
                 st.warning("⚠️ No questions found. Please create a question first.")
 
         with tab3:
-            st.subheader("📋 Student Answers Template (CSV)")
+            st.subheader("📋 Templates (CSV)")
             templates = import_export_service.get_export_templates()
+            
+            # Student Answers Template
+            st.write("**📝 Student Answers Template:**")
             answers_template = templates['student_answers']
             output = io.StringIO()
             writer = csv.writer(output)
@@ -983,9 +1337,27 @@ def main_app():
                 mime="text/csv"
             )
             st.code(output.getvalue())
+            
+            st.divider()
+            
+            # Test Answers Template
+            st.write("**📋 Test Answers Template:**")
+            test_answers_template = templates['test_answers']
+            test_output = io.StringIO()
+            test_writer = csv.writer(test_output)
+            test_writer.writerow(test_answers_template['headers'])
+            test_writer.writerow(test_answers_template['example'])
+            st.download_button(
+                label="📥 Download Test Answers Template",
+                data=test_output.getvalue(),
+                file_name="test_answers_template.csv",
+                mime="text/csv"
+            )
+            st.code(test_output.getvalue())
+            
             st.info("""
             **Instructions:**
-            1. Download the template
+            1. Download the appropriate template
             2. Fill in your data following the format
             3. Save as CSV
             4. Upload using the Import tab
@@ -1000,14 +1372,21 @@ def main_app():
                 db = get_db()
                 answers_count = db.answers.count_documents({"user_id": st.session_state.user["_id"]})
                 grades_count = db.grades.count_documents({"user_id": st.session_state.user["_id"]})
+                tests_count = db.tests.count_documents({"user_id": st.session_state.user["_id"]})
+                test_answers_count = db.test_answers.count_documents({"user_id": st.session_state.user["_id"]})
+                test_grades_count = db.test_grades.count_documents({"user_id": st.session_state.user["_id"]})
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("📝 Current Student Answers", answers_count)
+                    st.metric("📝 Student Answers", answers_count)
+                    st.metric("📋 Tests", tests_count)
                 with col2:
-                    st.metric("📊 Current Grades", grades_count)
+                    st.metric("📊 Grades", grades_count)
+                    st.metric("📝 Test Answers", test_answers_count)
+                with col3:
+                    st.metric("📊 Test Grades", test_grades_count)
                 
-                if answers_count == 0 and grades_count == 0:
+                if answers_count == 0 and grades_count == 0 and tests_count == 0 and test_answers_count == 0 and test_grades_count == 0:
                     st.info("ℹ️ No data to delete. You can safely skip bulk operations.")
                 else:
                     st.info("💡 **Tip**: Consider exporting your data before performing bulk deletions.")
@@ -1066,10 +1445,62 @@ def main_app():
                     else:
                         st.error("Please check the box to enable deletion.")
             
+            st.divider()
+            
+            # Clear Test Grades
+            st.write("**🗑️ Clear All Test Grades**")
+            confirm_test_grades = st.checkbox("I understand this will delete ALL test grading results", key="confirm_test_grades_bulk")
+            with st.form("clear_test_grades_form_bulk"):
+                clear_test_grades_submitted = st.form_submit_button("🗑️ Clear All Test Grades", disabled=not confirm_test_grades)
+                if clear_test_grades_submitted:
+                    if confirm_test_grades:
+                        with st.spinner("Clearing all test grades..."):
+                            try:
+                                success, message = clear_test_grades(st.session_state.user["_id"])
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    if 'grading_results' in st.session_state:
+                                        del st.session_state.grading_results
+                                else:
+                                    st.error(f"❌ {message}")
+                            except Exception as e:
+                                st.error(f"❌ Error: {str(e)}")
+                                st.error("Please check your database connection and try again.")
+                    else:
+                        st.error("Please check the box to enable deletion.")
+            
+            st.divider()
+            
+            # Clear Test Answers
+            st.write("**🗑️ Clear All Test Answers**")
+            confirm_test_answers = st.checkbox("I understand this will delete ALL test submissions", key="confirm_test_answers_bulk")
+            with st.form("clear_test_answers_form_bulk"):
+                clear_test_answers_submitted = st.form_submit_button("🗑️ Clear All Test Answers", disabled=not confirm_test_answers)
+                if clear_test_answers_submitted:
+                    if confirm_test_answers:
+                        with st.spinner("Clearing all test answers..."):
+                            try:
+                                db = get_db()
+                                count = db.test_answers.count_documents({"user_id": st.session_state.user["_id"]})
+                                if count == 0:
+                                    st.info("ℹ️ No test answers found to delete")
+                                else:
+                                    result = db.test_answers.delete_many({"user_id": st.session_state.user["_id"]})
+                                    st.success(f"✅ Deleted {result.deleted_count} test answers")
+                                    if 'grading_results' in st.session_state:
+                                        del st.session_state.grading_results
+                            except Exception as e:
+                                st.error(f"❌ Error: {str(e)}")
+                                st.error("Please check your database connection and try again.")
+                    else:
+                        st.error("Please check the box to enable deletion.")
+            
             st.info("""
             **🗑️ Bulk Operations:**
-            - **Clear Student Answers**: Remove all student submissions
-            - **Clear Grades**: Remove all grading results
+            - **Clear Student Answers**: Remove all individual question submissions
+            - **Clear Grades**: Remove all individual question grading results
+            - **Clear Test Grades**: Remove all test grading results
+            - **Clear Test Answers**: Remove all test submissions
             
             **⚠️ Warning**: These operations are permanent and cannot be undone!
             Consider exporting your data before performing bulk deletions.
@@ -1082,6 +1513,12 @@ if 'token' not in st.session_state:
     st.session_state.token = None
 if 'show_signup' not in st.session_state:
     st.session_state.show_signup = False
+if 'selected_test_id' not in st.session_state:
+    st.session_state.selected_test_id = None
+if 'show_test_results' not in st.session_state:
+    st.session_state.show_test_results = False
+if 'grade_test' not in st.session_state:
+    st.session_state.grade_test = False
 
 # Migrate any existing query param sessions to session state
 migrate_query_params_to_session()

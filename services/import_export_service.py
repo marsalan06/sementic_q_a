@@ -4,7 +4,7 @@ import pandas as pd
 import io
 from datetime import datetime
 from bson.objectid import ObjectId
-from core.db import get_db, get_questions, get_student_answers, get_grades
+from core.db import get_db, get_questions, get_student_answers, get_grades, get_tests, get_test_answers, get_test_by_id, get_test_grades
 from services.auth_service import get_user_by_id
 
 class ImportExportService:
@@ -372,15 +372,212 @@ class ImportExportService:
             return False, f"Error importing answers: {str(e)}", []
     
     def get_export_templates(self):
-        """Get CSV templates for import"""
-        templates = {
-            'questions': {
-                'headers': ['question_text', 'sample_answer', 'rules'],
-                'example': ['What is the formula for force?', 'F = ma', 'mentions F = ma; contains force, mass, acceleration']
-            },
+        """Get export templates for different data types"""
+        return {
             'student_answers': {
                 'headers': ['student_name', 'student_roll_no', 'answer_text'],
-                'example': ['John Doe', '2023001', 'Force equals mass times acceleration']
+                'example': ['John Doe', '2023001', 'The answer to the question is...']
+            },
+            'test_answers': {
+                'headers': ['student_name', 'student_roll_no', 'question_1_answer', 'question_2_answer', 'question_3_answer'],
+                'example': ['John Doe', '2023001', 'Answer to question 1...', 'Answer to question 2...', 'Answer to question 3...']
             }
         }
-        return templates 
+
+    def export_tests_to_csv(self):
+        """Export all tests to CSV format"""
+        try:
+            tests = get_tests(self.user_id)
+            if not tests:
+                return False, "No tests found to export"
+            
+            csv_data = []
+            for test in tests:
+                # Get question details for this test
+                question_details = []
+                for qid in test.get('question_ids', []):
+                    question = self.db.questions.find_one({'_id': ObjectId(qid), 'user_id': self.user_id})
+                    if question:
+                        question_details.append(question.get('question', '')[:50] + '...')
+                
+                csv_data.append({
+                    'test_id': str(test.get('_id', '')),
+                    'test_name': test.get('test_name', ''),
+                    'test_description': test.get('test_description', ''),
+                    'questions': '; '.join(question_details),
+                    'total_questions': len(test.get('question_ids', [])),
+                    'created_at': test.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if test.get('created_at') else '',
+                    'is_active': test.get('is_active', True)
+                })
+            
+            output = io.StringIO()
+            if csv_data:
+                fieldnames = csv_data[0].keys()
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(csv_data)
+            return True, output.getvalue()
+        except Exception as e:
+            return False, f"Error exporting tests: {str(e)}"
+
+    def export_test_answers_to_csv(self, test_id=None):
+        """Export test answers to CSV format"""
+        try:
+            test_answers = get_test_answers(self.user_id, test_id)
+            if not test_answers:
+                return False, "No test answers found to export"
+            
+            csv_data = []
+            for answer in test_answers:
+                # Get test details
+                test = get_test_by_id(answer.get('test_id'), self.user_id)
+                if not test:
+                    continue
+                
+                # Create row with test info and question answers
+                row = {
+                    'test_id': str(answer.get('test_id', '')),
+                    'test_name': test.get('test_name', ''),
+                    'student_name': answer.get('student_name', ''),
+                    'student_roll_no': answer.get('student_roll_no', ''),
+                    'submitted_at': answer.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if answer.get('created_at') else ''
+                }
+                
+                # Add question answers
+                question_answers = answer.get('question_answers', {})
+                for qid in test.get('question_ids', []):
+                    question = self.db.questions.find_one({'_id': ObjectId(qid), 'user_id': self.user_id})
+                    if question:
+                        question_text = question.get('question', '')[:30] + '...'
+                        answer_text = question_answers.get(qid, '')
+                        row[f'Q_{question_text}'] = answer_text
+                
+                csv_data.append(row)
+            
+            output = io.StringIO()
+            if csv_data:
+                fieldnames = csv_data[0].keys()
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(csv_data)
+            return True, output.getvalue()
+        except Exception as e:
+            return False, f"Error exporting test answers: {str(e)}"
+
+    def export_test_grades_to_csv(self, test_id=None):
+        """Export test grades to CSV format"""
+        try:
+            test_grades = get_test_grades(self.user_id, test_id)
+            if not test_grades:
+                return False, "No test grades found to export"
+            
+            csv_data = []
+            for grade in test_grades:
+                # Get test details
+                test = get_test_by_id(grade.get('test_id'), self.user_id)
+                if not test:
+                    continue
+                
+                row = {
+                    'test_id': str(grade.get('test_id', '')),
+                    'test_name': test.get('test_name', ''),
+                    'student_name': grade.get('student_name', ''),
+                    'student_roll_no': grade.get('student_roll_no', ''),
+                    'overall_score': grade.get('overall_score', 0),
+                    'overall_percentage': grade.get('overall_percentage', '0%'),
+                    'overall_grade': grade.get('overall_grade', 'F'),
+                    'total_questions': grade.get('total_questions', 0),
+                    'answered_questions': grade.get('answered_questions', 0),
+                    'graded_at': grade.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if grade.get('created_at') else ''
+                }
+                
+                # Add question-wise scores
+                question_details = grade.get('question_details', [])
+                for i, q_detail in enumerate(question_details, 1):
+                    row[f'Q{i}_score'] = f"{q_detail.get('score', 0) * 100:.2f}%"
+                    row[f'Q{i}_grade'] = q_detail.get('grade', 'F')
+                
+                csv_data.append(row)
+            
+            output = io.StringIO()
+            if csv_data:
+                fieldnames = csv_data[0].keys()
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(csv_data)
+            return True, output.getvalue()
+        except Exception as e:
+            return False, f"Error exporting test grades: {str(e)}"
+
+    def import_test_answers_from_csv(self, csv_content, test_id):
+        """Import test answers from CSV format"""
+        try:
+            # Validate test exists
+            test = get_test_by_id(test_id, self.user_id)
+            if not test:
+                return False, "Test not found or doesn't belong to you", []
+            
+            # Parse CSV content
+            csv_reader = csv.DictReader(csv_content.splitlines())
+            
+            imported_count = 0
+            errors = []
+            
+            for row in csv_reader:
+                try:
+                    # Validate required fields
+                    if not row.get('student_name') or not row.get('student_roll_no'):
+                        errors.append(f"Row {imported_count + 1}: Missing student name or roll number")
+                        continue
+                    
+                    # Extract question answers from the row
+                    question_answers = {}
+                    question_ids = test.get('question_ids', [])
+                    
+                    for qid in question_ids:
+                        # Look for answer in the row (could be named Q1, Q2, etc. or question text)
+                        answer_found = False
+                        for key, value in row.items():
+                            if key.lower().startswith('q') and value.strip():
+                                # This is a question answer
+                                question_answers[qid] = value.strip()
+                                answer_found = True
+                                break
+                        
+                        if not answer_found:
+                            # Try to find by question text
+                            question = self.db.questions.find_one({'_id': ObjectId(qid), 'user_id': self.user_id})
+                            if question:
+                                question_text = question.get('question', '')[:30] + '...'
+                                for key, value in row.items():
+                                    if question_text in key and value.strip():
+                                        question_answers[qid] = value.strip()
+                                        break
+                    
+                    # Check if we have answers for all questions
+                    if len(question_answers) != len(question_ids):
+                        errors.append(f"Row {imported_count + 1}: Missing answers for some questions")
+                        continue
+                    
+                    # Save test answer
+                    from core.db import save_test_answer
+                    success, message = save_test_answer(
+                        row['student_name'],
+                        row['student_roll_no'],
+                        test_id,
+                        question_answers,
+                        self.user_id
+                    )
+                    
+                    if success:
+                        imported_count += 1
+                    else:
+                        errors.append(f"Row {imported_count + 1}: {message}")
+                        
+                except Exception as e:
+                    errors.append(f"Row {imported_count + 1}: {str(e)}")
+            
+            return True, f"Successfully imported {imported_count} test answers", errors
+            
+        except Exception as e:
+            return False, f"Error importing test answers: {str(e)}", [] 

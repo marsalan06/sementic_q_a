@@ -220,3 +220,225 @@ def get_question_by_id(qid, user_id):
     except Exception as e:
         print(f"Error getting question by ID: {e}")
         return None
+
+# Test Management Functions
+def save_test(test_name, test_description, question_ids, user_id):
+    """Save a test with validation"""
+    try:
+        if not test_name or not question_ids:
+            return False, "Test name and question IDs are required"
+        
+        if not user_id:
+            return False, "User ID is required"
+        
+        if not isinstance(question_ids, list) or len(question_ids) == 0:
+            return False, "At least one question must be selected"
+        
+        # Validate that all questions exist and belong to the user
+        for qid in question_ids:
+            question = db.questions.find_one({"_id": ObjectId(qid), "user_id": user_id})
+            if not question:
+                return False, f"Question with ID {qid} not found or doesn't belong to you"
+        
+        test_data = {
+            "test_name": test_name,
+            "test_description": test_description or "",
+            "question_ids": question_ids,
+            "user_id": user_id,
+            "created_at": datetime.utcnow(),
+            "is_active": True
+        }
+        
+        result = db.tests.insert_one(test_data)
+        return True, f"Test saved successfully with ID: {result.inserted_id}"
+    except Exception as e:
+        print(f"Error saving test: {e}")
+        return False, f"Error saving test: {str(e)}"
+
+def get_tests(user_id):
+    """Get all tests for a specific user"""
+    try:
+        if not user_id:
+            return []
+        
+        tests = list(db.tests.find({"user_id": user_id}).sort("created_at", -1))
+        return tests
+    except Exception as e:
+        print(f"Error getting tests: {e}")
+        return []
+
+def get_test_by_id(test_id, user_id):
+    """Get a specific test by ID for a user"""
+    try:
+        if not test_id or not user_id:
+            return None
+        
+        test = db.tests.find_one({"_id": ObjectId(test_id), "user_id": user_id})
+        return test
+    except Exception as e:
+        print(f"Error getting test by ID: {e}")
+        return None
+
+def delete_test(test_id, user_id):
+    """Delete a test and its associated data"""
+    try:
+        if not test_id or not user_id:
+            return False, "Test ID and User ID are required"
+        
+        print(f"Attempting to delete test {test_id} for user {user_id}")
+        
+        # Check if test exists and belongs to user
+        test = db.tests.find_one({"_id": ObjectId(test_id), "user_id": user_id})
+        if not test:
+            print(f"Test {test_id} not found for user {user_id}")
+            return False, "Test not found or doesn't belong to you"
+        
+        print(f"Found test: {test.get('test_name', 'Unknown')}")
+        
+        # Delete test
+        result = db.tests.delete_one({"_id": ObjectId(test_id), "user_id": user_id})
+        print(f"Test deletion result: {result.deleted_count} documents deleted")
+        
+        # Delete associated test answers and grades
+        try:
+            test_answers_result = db.test_answers.delete_many({"test_id": test_id})
+            print(f"Test answers deletion result: {test_answers_result.deleted_count} documents deleted")
+        except Exception as e:
+            print(f"Warning: Could not delete test answers: {e}")
+        
+        try:
+            test_grades_result = db.test_grades.delete_many({"test_id": test_id})
+            print(f"Test grades deletion result: {test_grades_result.deleted_count} documents deleted")
+        except Exception as e:
+            print(f"Warning: Could not delete test grades: {e}")
+        
+        return True, f"Test and associated data deleted successfully"
+    except Exception as e:
+        print(f"Error deleting test: {e}")
+        return False, f"Error deleting test: {str(e)}"
+
+def save_test_answer(student_name, student_roll_no, test_id, question_answers, user_id):
+    """Save a student's answers for an entire test"""
+    try:
+        if not student_name or not student_roll_no or not test_id or not question_answers:
+            return False, "Student name, roll number, test ID, and answers are required"
+        
+        if not user_id:
+            return False, "User ID is required"
+        
+        # Validate test exists and belongs to user
+        test = db.tests.find_one({"_id": ObjectId(test_id), "user_id": user_id})
+        if not test:
+            return False, "Test not found or doesn't belong to you"
+        
+        # Validate that all questions in the test have answers
+        test_question_ids = set(test.get("question_ids", []))
+        answer_question_ids = set(question_answers.keys())
+        
+        if test_question_ids != answer_question_ids:
+            missing_questions = test_question_ids - answer_question_ids
+            extra_questions = answer_question_ids - test_question_ids
+            error_msg = []
+            if missing_questions:
+                error_msg.append(f"Missing answers for questions: {', '.join(missing_questions)}")
+            if extra_questions:
+                error_msg.append(f"Extra answers for questions not in test: {', '.join(extra_questions)}")
+            return False, "; ".join(error_msg)
+        
+        # Check if student already has answers for this test
+        existing_answer = db.test_answers.find_one({
+            "test_id": test_id,
+            "student_roll_no": student_roll_no,
+            "user_id": user_id
+        })
+        
+        if existing_answer:
+            return False, f"Student {student_roll_no} already has answers for this test"
+        
+        # Create test answer record
+        test_answer_data = {
+            "test_id": test_id,
+            "student_name": student_name,
+            "student_roll_no": student_roll_no,
+            "question_answers": question_answers,
+            "user_id": user_id,
+            "created_at": datetime.utcnow()
+        }
+        
+        result = db.test_answers.insert_one(test_answer_data)
+        return True, f"Test answers saved successfully with ID: {result.inserted_id}"
+    except Exception as e:
+        print(f"Error saving test answer: {e}")
+        return False, f"Error saving test answer: {str(e)}"
+
+def get_test_answers(user_id, test_id=None):
+    """Get test answers for a specific user and optionally a specific test"""
+    try:
+        if not user_id:
+            return []
+        
+        query = {"user_id": user_id}
+        if test_id:
+            query["test_id"] = test_id
+        
+        answers = list(db.test_answers.find(query).sort("created_at", -1))
+        return answers
+    except Exception as e:
+        print(f"Error getting test answers: {e}")
+        return []
+
+def save_test_grades(test_grades, user_id):
+    """Save test grades with validation"""
+    try:
+        if not test_grades or not isinstance(test_grades, list):
+            return False, "No test grades to save"
+        
+        if not user_id:
+            return False, "User ID is required"
+        
+        if len(test_grades) == 0:
+            return True, "No test grades to save (empty list)"
+        
+        # Add user_id to each grade record
+        for grade in test_grades:
+            if isinstance(grade, dict):
+                grade["user_id"] = user_id
+                grade["created_at"] = datetime.utcnow()
+        
+        result = db.test_grades.insert_many(test_grades)
+        return True, f"Saved {len(result.inserted_ids)} test grades successfully"
+    except Exception as e:
+        print(f"Error saving test grades: {e}")
+        return False, f"Error saving test grades: {str(e)}"
+
+def get_test_grades(user_id, test_id=None):
+    """Get test grades for a specific user and optionally a specific test"""
+    try:
+        if not user_id:
+            return []
+        
+        query = {"user_id": user_id}
+        if test_id:
+            query["test_id"] = test_id
+        
+        grades = list(db.test_grades.find(query).sort("created_at", -1))
+        return grades
+    except Exception as e:
+        print(f"Error getting test grades: {e}")
+        return []
+
+def clear_test_grades(user_id, test_id=None):
+    """Clear test grades for a specific user and optionally a specific test"""
+    try:
+        if not user_id:
+            return False, "User ID is required"
+        
+        query = {"user_id": user_id}
+        if test_id:
+            query["test_id"] = test_id
+        
+        result = db.test_grades.delete_many(query)
+        return True, f"Cleared {result.deleted_count} test grades"
+    except Exception as e:
+        print(f"Error clearing test grades: {e}")
+        return False, f"Error clearing test grades: {str(e)}"
