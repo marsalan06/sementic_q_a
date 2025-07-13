@@ -2,364 +2,180 @@ import streamlit as st
 from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db, get_student_answers, get_grades, save_test, get_tests, get_test_by_id, delete_test, save_test_answer, get_test_answers, save_test_grades, get_test_grades, clear_test_grades
 from services.grading_service import grade_all
 from services.test_grading_service import grade_test, get_test_statistics
-from services.auth_service import create_user, authenticate_user, create_session_token, verify_session_token, get_user_by_id, refresh_session_token, get_session_info
+from services.auth_service import create_user, authenticate_user, create_session_token, verify_session_token, get_user_by_id, refresh_session_token, get_session_info, create_mongo_session, get_mongo_session, update_mongo_session, delete_mongo_session, validate_mongo_session
 from services.import_export_service import ImportExportService
 from bson.objectid import ObjectId
-import json
-import pickle
-import base64
 import time
-import os
-import tempfile
-import csv
+import secrets
+from datetime import datetime
 import io
 import zipfile
-from datetime import datetime
-
+import csv
 st.set_page_config(page_title="Scorix", layout="wide")
 
-# Session file path
-SESSION_FILE = os.path.join(tempfile.gettempdir(), "semantic_grader_session.pkl")
+# --- Session Management ---
+def set_session_token(token):
+    """Store session token in session state."""
+    st.session_state.token = token
 
-def save_session_to_file(session_data):
-    """Save session data to a temporary file"""
-    try:
-        with open(SESSION_FILE, 'wb') as f:
-            pickle.dump(session_data, f)
-        return True
-    except Exception:
-        return False
+def get_session_token():
+    """Retrieve session token from session state."""
+    return st.session_state.get('token', None)
 
-def load_session_from_file():
-    """Load session data from temporary file"""
-    try:
-        if os.path.exists(SESSION_FILE):
-            with open(SESSION_FILE, 'rb') as f:
-                session_data = pickle.load(f)
-            return session_data
-    except Exception:
-        pass
-    return None
+def get_session_id():
+    """Get or create a unique session ID for this browser tab."""
+    if 'session_id' not in st.session_state:
+        import uuid
+        st.session_state.session_id = str(uuid.uuid4())
+    return st.session_state.session_id
 
-def clear_session_file():
-    """Clear session file"""
-    try:
-        if os.path.exists(SESSION_FILE):
-            os.remove(SESSION_FILE)
-    except Exception:
-        pass
+def set_session_user(user):
+    """Store user info in session state."""
+    st.session_state.user = user
 
-def encode_session_data(data):
-    """Encode session data for storage"""
-    try:
-        serialized = pickle.dumps(data)
-        encoded = base64.b64encode(serialized).decode('utf-8')
-        return encoded
-    except Exception:
-        return None
+def get_session_user():
+    """Retrieve user info from session state."""
+    return st.session_state.get('user', None)
 
-def decode_session_data(encoded_data):
-    """Decode session data from storage"""
-    try:
-        if not encoded_data:
-            return None
-        decoded = base64.b64decode(encoded_data.encode('utf-8'))
-        data = pickle.loads(decoded)
-        return data
-    except Exception:
-        return None
+def save_session_to_mongo():
+    """Save session token and user to MongoDB."""
+    token = get_session_token()
+    user = get_session_user()
+    if token and user:
+        session = get_mongo_session(token)
+        if session:
+            update_mongo_session(token, user)
+        else:
+            payload = verify_session_token(token)
+            if payload:
+                create_mongo_session(payload['user_id'], payload['username'], token)
+                update_mongo_session(token, user)
 
-def get_persistent_session():
-    """Get session data from persistent storage with multiple fallback methods"""
-    
-    # Method 1: Direct session state access
-    try:
-        if hasattr(st, 'session_state'):
-            session_data = st.session_state.get('persistent_session', None)
-            if session_data:
-                return session_data
-    except Exception:
-        pass
-    
-    # Method 2: Internal session state access
-    try:
-        if hasattr(st, '_session_state') and hasattr(st._session_state, '_session_state'):
-            session_data = st._session_state._session_state.get('persistent_session', None)
-            if session_data:
-                return session_data
-    except Exception:
-        pass
-    
-    # Method 3: File-based storage (most reliable)
-    try:
-        file_session = load_session_from_file()
-        if file_session:
-            return file_session
-    except Exception:
-        pass
-    
-    # Method 4: Query params (for backward compatibility)
-    try:
-        if hasattr(st, 'query_params'):
-            encoded_data = st.query_params.get('session', None)
-            if encoded_data:
-                decoded_data = decode_session_data(encoded_data)
-                if decoded_data:
-                    return decoded_data
-    except Exception:
-        pass
-    
-    return {}
-
-def set_persistent_session(session_data):
-    """Set session data in persistent storage with multiple methods"""
-    
-    # Method 1: File-based storage (most reliable)
-    try:
-        save_session_to_file(session_data)
-    except Exception:
-        pass
-    
-    # Method 2: Direct session state access
-    try:
-        if hasattr(st, 'session_state'):
-            st.session_state['persistent_session'] = session_data
-    except Exception:
-        pass
-    
-    # Method 3: Internal session state access
-    try:
-        if hasattr(st, '_session_state') and hasattr(st._session_state, '_session_state'):
-            st._session_state._session_state['persistent_session'] = session_data
-    except Exception:
-        pass
-    
-    # Method 4: Query params as fallback
-    try:
-        if hasattr(st, 'query_params'):
-            encoded_data = encode_session_data(session_data)
-            if encoded_data:
-                st.query_params['session'] = encoded_data
-    except Exception:
-        pass
-
-def clear_query_params():
-    """Clear session-related query parameters to keep URL clean"""
-    try:
-        if hasattr(st, 'query_params') and 'session' in st.query_params:
-            current_params = st.query_params.to_dict()
-            if 'session' in current_params:
-                del current_params['session']
-                st.query_params.from_dict(current_params)
-    except Exception:
-        pass
-
-def migrate_query_params_to_session():
-    """Migrate any existing session data from query params to session state"""
-    try:
-        if hasattr(st, 'query_params') and 'session' in st.query_params:
-            encoded_data = st.query_params.get('session')
-            if encoded_data:
-                decoded_data = decode_session_data(encoded_data)
-                if decoded_data:
-                    set_persistent_session(decoded_data)
-                    clear_query_params()
+def refresh_session_if_needed():
+    """Check and refresh session if it's about to expire."""
+    token = get_session_token()
+    if token:
+        session_info = get_session_info(token)
+        if session_info and not session_info['is_expired']:
+            time_remaining = int(session_info['expires_at'] - time.time())
+            if time_remaining < 600:  # If less than 10 minutes remain
+                refreshed_token = refresh_session_token(token)
+                if refreshed_token:
+                    set_session_token(refreshed_token)
+                    save_session_to_mongo()
                     return True
-    except Exception:
-        pass
     return False
-
-def initialize_session():
-    """Initialize session from persistent storage on app startup"""
-    
-    # Check if we already have a session in current state
-    if st.session_state.token and st.session_state.user:
-        return
-    
-    # Try to restore from persistent storage
-    persistent_session = get_persistent_session()
-    if persistent_session.get('token'):
-        payload = verify_session_token(persistent_session['token'])
-        if payload:
-            st.session_state.token = persistent_session['token']
-            if persistent_session.get('user'):
-                st.session_state.user = persistent_session['user']
-            else:
-                # Fetch user data from database
-                user = get_user_by_id(ObjectId(payload['user_id']))
-                if user:
-                    st.session_state.user = user
-        else:
-            # Clear invalid persistent session
-            set_persistent_session({})
-            clear_session_file()
-
-def check_auth():
-    """Check if user is authenticated with persistent session"""
-    
-    # First check current session state
-    if st.session_state.token:
-        payload = verify_session_token(st.session_state.token)
-        if payload:
-            # If user data is missing, fetch it from database
-            if not st.session_state.user and payload.get('user_id'):
-                user = get_user_by_id(ObjectId(payload['user_id']))
-                if user:
-                    st.session_state.user = user
-            return True
-        else:
-            # Try to refresh the token
-            refreshed_token = refresh_session_token(st.session_state.token)
-            if refreshed_token:
-                st.session_state.token = refreshed_token
-                save_session()
-                return True
-    
-    # Check persistent session
-    persistent_session = get_persistent_session()
-    if persistent_session.get('token'):
-        payload = verify_session_token(persistent_session['token'])
-        if payload:
-            # Restore session from persistent storage
-            st.session_state.token = persistent_session['token']
-            if persistent_session.get('user'):
-                st.session_state.user = persistent_session['user']
-            else:
-                # Fetch user data from database
-                user = get_user_by_id(ObjectId(payload['user_id']))
-                if user:
-                    st.session_state.user = user
-                    # Update persistent session
-                    persistent_session['user'] = user
-                    set_persistent_session(persistent_session)
-            return True
-        else:
-            # Try to refresh the persistent token
-            refreshed_token = refresh_session_token(persistent_session['token'])
-            if refreshed_token:
-                st.session_state.token = refreshed_token
-                if persistent_session.get('user'):
-                    st.session_state.user = persistent_session['user']
-                else:
-                    # Fetch user data from database
-                    session_info = get_session_info(refreshed_token)
-                    if session_info and session_info.get('user_id'):
-                        user = get_user_by_id(ObjectId(session_info['user_id']))
-                        if user:
-                            st.session_state.user = user
-                            persistent_session['user'] = user
-                
-                # Update persistent session with new token
-                persistent_session['token'] = refreshed_token
-                set_persistent_session(persistent_session)
-                save_session()
-                return True
-    
-    return False
-
-def save_session():
-    """Save current session to persistent storage"""
-    if st.session_state.token and st.session_state.user:
-        session_data = {
-            'token': st.session_state.token,
-            'user': st.session_state.user
-        }
-        set_persistent_session(session_data)
-        clear_query_params()
 
 def clear_session():
-    """Clear both current and persistent session"""
-    st.session_state.user = None
+    """Clear session state and delete MongoDB session."""
+    token = get_session_token()
+    if token:
+        delete_mongo_session(token)
+    # Clear only session-related data, keep UI state
     st.session_state.token = None
-    set_persistent_session({})
-    clear_query_params()
-    clear_session_file()
+    st.session_state.user = None
+    # Don't clear session_id to maintain tab identity
 
-def auto_refresh_session():
-    """Automatically refresh session if needed"""
-    if st.session_state.token:
-        session_info = get_session_info(st.session_state.token)
-        if session_info and not session_info['is_expired']:
-            # If session expires in less than 10 minutes, refresh it
-            time_remaining = int(session_info['expires_at'] - time.time())
-            if time_remaining < 600:  # 10 minutes
-                refreshed_token = refresh_session_token(st.session_state.token)
-                if refreshed_token:
-                    st.session_state.token = refreshed_token
-                    save_session()
+def initialize_session():
+    """Initialize session from MongoDB if token exists."""
+    if 'token' not in st.session_state:
+        st.session_state.token = None
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    
+    # Initialize session ID for this tab
+    get_session_id()
+
+    # Try to restore session from MongoDB if we have a token
+    token = get_session_token()
+    if token:
+        # First check if session exists in MongoDB
+        mongo_session = get_mongo_session(token)
+        if mongo_session:
+            # Session exists in MongoDB, verify token
+            payload = verify_session_token(token)
+            if payload:
+                user = get_user_by_id(ObjectId(payload['user_id']))
+                if user:
+                    set_session_user(user)
+                    # Update session activity
+                    update_mongo_session(token, user)
+                    return
+            else:
+                # Token is invalid, clear MongoDB session
+                delete_mongo_session(token)
+                clear_session()
+        else:
+            # No MongoDB session, clear local session
+            clear_session()
+
+def check_auth():
+    """Check if user is authenticated with valid session."""
+    token = get_session_token()
+    if token:
+        # Check MongoDB session first
+        mongo_session = get_mongo_session(token)
+        if mongo_session:
+            session_info = get_session_info(token)
+            if session_info and not session_info['is_expired']:
+                return True
+            else:
+                # Try to refresh session
+                if refresh_session_if_needed():
                     return True
+                else:
+                    # Session expired, clean up
+                    delete_mongo_session(token)
+                    clear_session()
+                    return False
+        else:
+            # No MongoDB session, clear local session
+            clear_session()
+            return False
     return False
 
+# --- End Session Management ---
+
+# --- Login Page ---
 def login_page():
-    """Login page"""
+    """Login page to handle user login and session creation."""
     st.title("🔐 Login to Scorix")
-    
-    # Check if there's a recoverable session
-    persistent_session = get_persistent_session()
-    if persistent_session.get('token'):
-        session_info = get_session_info(persistent_session['token'])
-        if session_info and not session_info['is_expired']:
-            st.info("🔍 Found an active session. You can continue with your previous session.")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🔄 Continue Previous Session"):
-                    st.session_state.token = persistent_session['token']
-                    if persistent_session.get('user'):
-                        st.session_state.user = persistent_session['user']
-                    else:
-                        user = get_user_by_id(ObjectId(session_info['user_id']))
-                        if user:
-                            st.session_state.user = user
-                    save_session()
-                    clear_query_params()
-                    st.success("Session restored!")
-                    st.rerun()
-            with col2:
-                if st.button("🗑️ Clear Previous Session"):
-                    set_persistent_session({})
-                    clear_query_params()
-                    clear_session_file()
-                    st.success("Previous session cleared!")
-                    st.rerun()
-            st.divider()
-    
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Login")
-        
         if submitted:
             if username and password:
                 user, message = authenticate_user(username, password)
                 if user:
-                    st.session_state.user = user
-                    st.session_state.token = create_session_token(user["_id"], user["username"])
-                    # Save session persistently
-                    save_session()
-                    st.success("Login successful!")
-                    st.rerun()
+                    set_session_user(user)
+                    token = create_session_token(user["_id"], user["username"])
+                    if token:
+                        set_session_token(token)  # Store session in session state
+                        save_session_to_mongo()  # Save to MongoDB for persistence
+                        st.success("Login successful!")
+                        st.rerun()  # Re-run the app to initialize session state
+                    else:
+                        st.error("Failed to create session token")
                 else:
                     st.error(message)
             else:
                 st.error("Please enter both username and password")
-    
     st.divider()
     st.write("Don't have an account?")
     if st.button("Sign Up"):
         st.session_state.show_signup = True
         st.rerun()
 
+# --- Signup Page ---
 def signup_page():
-    """Signup page"""
     st.title("📝 Create Account")
-    
     with st.form("signup_form"):
         username = st.text_input("Username (min 3 characters)")
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
         confirm_password = st.text_input("Confirm Password", type="password")
         submitted = st.form_submit_button("Create Account")
-        
         if submitted:
             if not username or len(username) < 3:
                 st.error("Username must be at least 3 characters long")
@@ -377,57 +193,52 @@ def signup_page():
                     st.rerun()
                 else:
                     st.error(message)
-    
     st.divider()
     st.write("Already have an account?")
     if st.button("Login"):
         st.session_state.show_signup = False
         st.rerun()
 
+# --- Logout ---
 def logout():
-    """Logout function"""
+    """Log out user and clear session."""
     clear_session()
+    st.session_state.token = None
+    st.session_state.user = None
     st.rerun()
 
+# --- Main App ---
 def main_app():
-    """Main application after authentication"""
-    # Header with user info and logout
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         st.title("🎓 Scorix")
     with col2:
         st.write(f"**Welcome, {st.session_state.user['username']}!**")
-        
-        # Show session status
         session_info = get_session_info(st.session_state.token)
         if session_info:
             if session_info['is_expired']:
                 st.error("⚠️ Session expired")
             else:
-                # Calculate time remaining
                 time_remaining = int(session_info['expires_at'] - time.time())
-                if time_remaining > 3600:  # More than 1 hour
+                if time_remaining > 3600:
                     st.success(f"🟢 Session active ({time_remaining//3600}h {(time_remaining%3600)//60}m)")
-                elif time_remaining > 300:  # More than 5 minutes
+                elif time_remaining > 300:
                     st.warning(f"🟡 Session expires in {time_remaining//60}m")
                 else:
                     st.error(f"🔴 Session expires in {time_remaining}s")
-    
     with col3:
         if st.button("🔄 Refresh Session"):
             refreshed_token = refresh_session_token(st.session_state.token)
             if refreshed_token:
-                st.session_state.token = refreshed_token
-                save_session()
+                set_session_token(refreshed_token)
+                save_session_to_mongo()
                 st.success("Session refreshed!")
                 st.rerun()
             else:
                 st.error("Failed to refresh session")
-    
     with col4:
         if st.button("🚪 Logout"):
             logout()
-    
     # Navigation
     page = st.sidebar.selectbox("Navigation", ["Create Question", "Test Management", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
     
@@ -1511,6 +1322,8 @@ if 'user' not in st.session_state:
     st.session_state.user = None
 if 'token' not in st.session_state:
     st.session_state.token = None
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = None
 if 'show_signup' not in st.session_state:
     st.session_state.show_signup = False
 if 'selected_test_id' not in st.session_state:
@@ -1520,19 +1333,24 @@ if 'show_test_results' not in st.session_state:
 if 'grade_test' not in st.session_state:
     st.session_state.grade_test = False
 
-# Migrate any existing query param sessions to session state
-migrate_query_params_to_session()
 
-# Initialize session from persistent storage
-initialize_session()
+
+
 
 # Main app logic
-if check_auth():
-    # Auto-refresh session if needed
-    auto_refresh_session()
-    main_app()
-else:
-    if st.session_state.get('show_signup', False):
-        signup_page()
+def main():
+    # Initialize session
+    initialize_session()
+
+    if check_auth():
+        refresh_session_if_needed()
+        main_app()
     else:
-        login_page()
+        if st.session_state.get('show_signup', False):
+            signup_page()
+        else:
+            login_page()
+
+# Run the main app
+if __name__ == "__main__":
+    main()

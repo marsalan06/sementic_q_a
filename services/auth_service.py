@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from core.db import get_db
 from config import JWT_SECRET, SESSION_TIMEOUT
+from bson.objectid import ObjectId
 
 def hash_password(password):
     """Hash a password using bcrypt"""
@@ -203,4 +204,170 @@ def get_session_info(token):
         return None
     except Exception as e:
         print(f"Error getting session info: {e}")
-        return None 
+        return None
+
+# MongoDB-based session management functions
+def create_mongo_session(user_id, username, token):
+    """Create a new session in MongoDB"""
+    try:
+        db = get_db()
+        
+        # Clean up expired sessions first
+        cleanup_expired_sessions()
+        
+        # Create session document
+        session = {
+            "user_id": ObjectId(user_id),
+            "username": username,
+            "token": token,
+            "created_at": datetime.utcnow(),
+            "last_activity": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(seconds=SESSION_TIMEOUT),
+            "is_active": True
+        }
+        
+        result = db.sessions.insert_one(session)
+        return result.inserted_id is not None
+    except Exception as e:
+        print(f"Error creating MongoDB session: {e}")
+        return False
+
+def get_mongo_session(token):
+    """Get session data from MongoDB"""
+    try:
+        if not token:
+            return None
+        
+        db = get_db()
+        
+        # Find active session
+        session = db.sessions.find_one({
+            "token": token,
+            "is_active": True,
+            "expires_at": {"$gt": datetime.utcnow()}
+        })
+        
+        if session:
+            # Update last activity
+            db.sessions.update_one(
+                {"_id": session["_id"]},
+                {"$set": {"last_activity": datetime.utcnow()}}
+            )
+            return session
+        
+        return None
+    except Exception as e:
+        print(f"Error getting MongoDB session: {e}")
+        return None
+
+def update_mongo_session(token, user_data=None):
+    """Update session data in MongoDB"""
+    try:
+        if not token:
+            return False
+        
+        db = get_db()
+        
+        update_data = {
+            "last_activity": datetime.utcnow()
+        }
+        
+        if user_data:
+            update_data["user_data"] = user_data
+        
+        result = db.sessions.update_one(
+            {"token": token, "is_active": True},
+            {"$set": update_data}
+        )
+        
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error updating MongoDB session: {e}")
+        return False
+
+def delete_mongo_session(token):
+    """Delete a session from MongoDB"""
+    try:
+        if not token:
+            return False
+        
+        db = get_db()
+        
+        result = db.sessions.update_one(
+            {"token": token},
+            {"$set": {"is_active": False}}
+        )
+        
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error deleting MongoDB session: {e}")
+        return False
+
+def delete_user_sessions(user_id):
+    """Delete all sessions for a specific user"""
+    try:
+        if not user_id:
+            return False
+        
+        db = get_db()
+        
+        result = db.sessions.update_many(
+            {"user_id": ObjectId(user_id)},
+            {"$set": {"is_active": False}}
+        )
+        
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error deleting user sessions: {e}")
+        return False
+
+def cleanup_expired_sessions():
+    """Clean up expired sessions from MongoDB"""
+    try:
+        db = get_db()
+        
+        # Mark expired sessions as inactive
+        result = db.sessions.update_many(
+            {
+                "expires_at": {"$lt": datetime.utcnow()},
+                "is_active": True
+            },
+            {"$set": {"is_active": False}}
+        )
+        
+        # Optionally, delete very old sessions (older than 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        db.sessions.delete_many({
+            "created_at": {"$lt": thirty_days_ago}
+        })
+        
+        return result.modified_count
+    except Exception as e:
+        print(f"Error cleaning up expired sessions: {e}")
+        return 0
+
+def get_active_sessions_count(user_id=None):
+    """Get count of active sessions"""
+    try:
+        db = get_db()
+        
+        query = {"is_active": True, "expires_at": {"$gt": datetime.utcnow()}}
+        if user_id:
+            query["user_id"] = ObjectId(user_id)
+        
+        return db.sessions.count_documents(query)
+    except Exception as e:
+        print(f"Error getting active sessions count: {e}")
+        return 0
+
+def validate_mongo_session(token):
+    """Validate if a session exists and is active in MongoDB"""
+    try:
+        if not token:
+            return False
+        
+        session = get_mongo_session(token)
+        return session is not None
+    except Exception as e:
+        print(f"Error validating MongoDB session: {e}")
+        return False 
