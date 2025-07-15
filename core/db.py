@@ -221,6 +221,83 @@ def get_question_by_id(qid, user_id):
         print(f"Error getting question by ID: {e}")
         return None
 
+def update_question(question_id, question_text, sample_answer, rules, user_id):
+    """Update a question with validation"""
+    try:
+        if not question_id or not question_text or not sample_answer:
+            return False, "Question ID, text, and sample answer are required"
+        
+        if not user_id:
+            return False, "User ID is required"
+        
+        # Check if question exists and belongs to user
+        existing_question = db.questions.find_one({"_id": ObjectId(question_id), "user_id": user_id})
+        if not existing_question:
+            return False, "Question not found or doesn't belong to you"
+        
+        # Convert simple rules to rule objects with types
+        rule_objects = []
+        if rules:
+            for rule in rules:
+                if rule and isinstance(rule, str):
+                    # Auto-determine rule type based on content
+                    rule_type = detect_rule_type(rule)
+                    rule_objects.append({
+                        "text": rule,
+                        "type": rule_type
+                    })
+                elif isinstance(rule, dict) and rule.get("text"):
+                    rule_objects.append(rule)
+        
+        # Update question data
+        update_data = {
+            "question": question_text,
+            "sample_answer": sample_answer,
+            "marking_scheme": rule_objects,
+            "updated_at": datetime.utcnow()
+        }
+        
+        result = db.questions.update_one(
+            {"_id": ObjectId(question_id), "user_id": user_id},
+            {"$set": update_data}
+        )
+        
+        if result.modified_count > 0:
+            return True, "Question updated successfully"
+        else:
+            return False, "No changes made to question"
+    except Exception as e:
+        print(f"Error updating question: {e}")
+        return False, f"Error updating question: {str(e)}"
+
+def delete_question(question_id, user_id):
+    """Delete a question and all related data"""
+    try:
+        if not question_id or not user_id:
+            return False, "Question ID and user ID are required"
+        
+        # Check if question exists and belongs to user
+        existing_question = db.questions.find_one({"_id": ObjectId(question_id), "user_id": user_id})
+        if not existing_question:
+            return False, "Question not found or doesn't belong to you"
+        
+        # Delete related student answers
+        answers_deleted = db.answers.delete_many({"question_id": question_id, "user_id": user_id})
+        
+        # Delete related grades
+        grades_deleted = db.grades.delete_many({"question_id": question_id, "user_id": user_id})
+        
+        # Delete the question
+        question_deleted = db.questions.delete_one({"_id": ObjectId(question_id), "user_id": user_id})
+        
+        if question_deleted.deleted_count > 0:
+            return True, f"Question deleted successfully. Also deleted {answers_deleted.deleted_count} answers and {grades_deleted.deleted_count} grades"
+        else:
+            return False, "Failed to delete question"
+    except Exception as e:
+        print(f"Error deleting question: {e}")
+        return False, f"Error deleting question: {str(e)}"
+
 # Test Management Functions
 def save_test(test_name, test_description, question_ids, user_id):
     """Save a test with validation"""
@@ -254,6 +331,50 @@ def save_test(test_name, test_description, question_ids, user_id):
     except Exception as e:
         print(f"Error saving test: {e}")
         return False, f"Error saving test: {str(e)}"
+
+def update_test(test_id, test_name, test_description, question_ids, user_id):
+    """Update a test with validation"""
+    try:
+        if not test_id or not test_name or not question_ids:
+            return False, "Test ID, name, and question IDs are required"
+        
+        if not user_id:
+            return False, "User ID is required"
+        
+        if not isinstance(question_ids, list) or len(question_ids) == 0:
+            return False, "At least one question must be selected"
+        
+        # Check if test exists and belongs to user
+        existing_test = db.tests.find_one({"_id": ObjectId(test_id), "user_id": user_id})
+        if not existing_test:
+            return False, "Test not found or doesn't belong to you"
+        
+        # Validate that all questions exist and belong to the user
+        for qid in question_ids:
+            question = db.questions.find_one({"_id": ObjectId(qid), "user_id": user_id})
+            if not question:
+                return False, f"Question with ID {qid} not found or doesn't belong to you"
+        
+        # Update test data
+        update_data = {
+            "test_name": test_name,
+            "test_description": test_description or "",
+            "question_ids": question_ids,
+            "updated_at": datetime.utcnow()
+        }
+        
+        result = db.tests.update_one(
+            {"_id": ObjectId(test_id), "user_id": user_id},
+            {"$set": update_data}
+        )
+        
+        if result.modified_count > 0:
+            return True, "Test updated successfully"
+        else:
+            return False, "No changes made to test"
+    except Exception as e:
+        print(f"Error updating test: {e}")
+        return False, f"Error updating test: {str(e)}"
 
 def get_tests(user_id):
     """Get all tests for a specific user"""

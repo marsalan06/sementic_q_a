@@ -1,5 +1,5 @@
 import streamlit as st
-from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db, get_student_answers, get_grades, save_test, get_tests, get_test_by_id, delete_test, save_test_answer, get_test_answers, save_test_grades, get_test_grades, clear_test_grades
+from core.db import save_question, save_student_answer, get_questions, save_grades, clear_grades, detect_rule_type, get_grade_thresholds, save_grade_thresholds, get_db, get_student_answers, get_grades, save_test, get_tests, get_test_by_id, delete_test, save_test_answer, get_test_answers, save_test_grades, get_test_grades, clear_test_grades, update_question, delete_question, update_test, get_question_by_id
 from services.grading_service import grade_all
 from services.test_grading_service import grade_test, get_test_statistics
 from services.auth_service import create_user, authenticate_user, create_session_token, verify_session_token, get_user_by_id, refresh_session_token, get_session_info, create_mongo_session, get_mongo_session, update_mongo_session, delete_mongo_session, validate_mongo_session
@@ -327,7 +327,7 @@ def main_app():
         if st.button("🚪 Logout"):
             logout()
     # Navigation
-    page = st.sidebar.selectbox("Navigation", ["Create Question", "Test Management", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
+    page = st.sidebar.selectbox("Navigation", ["Create Question", "Question Management", "Test Management", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
     
     if page == "Create Question":
         st.header("📝 Create a New Question")
@@ -372,6 +372,171 @@ def main_app():
                 reset_form_on_success("question_")
             else:
                 st.error(f"❌ {message}")
+
+    elif page == "Question Management":
+        st.header("📝 Question Management")
+        
+        questions = get_questions(st.session_state.user["_id"])
+        
+        if not questions:
+            st.info("ℹ️ No questions found. Create your first question in the 'Create Question' tab.")
+        else:
+            # Display questions in a clean card format
+            for question in questions:
+                question_id = str(question["_id"])
+                question_text = question["question"]
+                sample_answer = question.get("sample_answer", "")
+                marking_scheme = question.get("marking_scheme", [])
+                created_at = question.get("created_at", "")
+                
+                # Get related data counts
+                answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == question_id])
+                grades_count = len([g for g in get_grades(st.session_state.user["_id"]) if str(g.get("question_id")) == question_id])
+                
+                # Create a clean card layout
+                with st.container():
+                    st.markdown("---")
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    
+                    with col1:
+                        st.markdown(f"### 📝 {question_text[:100]}{'...' if len(question_text) > 100 else ''}")
+                        if sample_answer:
+                            st.caption(f"**Sample Answer:** {sample_answer[:150]}{'...' if len(sample_answer) > 150 else ''}")
+                        st.write(f"**Created:** {created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'}")
+                        st.write(f"**Rules:** {len(marking_scheme)} marking rules")
+                    
+                    with col2:
+                        st.metric("📝 Answers", answers_count)
+                        st.metric("📊 Grades", grades_count)
+                    
+                    with col3:
+                        # Action buttons in a clean row
+                        col_edit, col_delete = st.columns(2)
+                        
+                        with col_edit:
+                            if st.button("✏️ Edit", key=f"edit_question_{question_id}"):
+                                st.session_state.edit_question_id = question_id
+                                st.session_state.show_question_edit = True
+                                st.rerun()
+                        
+                        with col_delete:
+                            if st.button("🗑️ Delete", key=f"delete_question_{question_id}"):
+                                st.session_state.delete_question_id = question_id
+                                st.rerun()
+            
+            # Handle delete confirmation
+            if st.session_state.get('delete_question_id'):
+                question_id = st.session_state.delete_question_id
+                question = get_question_by_id(question_id, st.session_state.user["_id"])
+                if question:
+                    st.warning(f"⚠️ Are you sure you want to delete this question?")
+                    st.write(f"**Question:** {question['question'][:200]}{'...' if len(question['question']) > 200 else ''}")
+                    
+                    # Get counts for this specific question
+                    question_answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == question_id])
+                    question_grades_count = len([g for g in get_grades(st.session_state.user["_id"]) if str(g.get("question_id")) == question_id])
+                    st.write(f"**This will also delete:** {question_answers_count} answers and {question_grades_count} grades")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("✅ Yes, Delete"):
+                            success, message = delete_question(question_id, st.session_state.user["_id"])
+                            if success:
+                                st.success(f"✅ {message}")
+                                del st.session_state.delete_question_id
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
+                    with col2:
+                        if st.button("❌ Cancel"):
+                            del st.session_state.delete_question_id
+                            st.rerun()
+            
+            # Handle edit form
+            if st.session_state.get('show_question_edit', False) and st.session_state.get('edit_question_id'):
+                question_id = st.session_state.edit_question_id
+                question = get_question_by_id(question_id, st.session_state.user["_id"])
+                
+                if question:
+                    st.subheader("✏️ Edit Question")
+                    
+                    # Check for form reset
+                    clear_form_fields_on_reset("edit_question_")
+                    
+                    with st.form("edit_question_form"):
+                        question_text = st.text_area(
+                            "Question Text:", 
+                            value=question["question"], 
+                            key="edit_question_text"
+                        )
+                        sample_answer = st.text_area(
+                            "Sample Answer:", 
+                            value=question.get("sample_answer", ""), 
+                            key="edit_question_sample_answer"
+                        )
+                        
+                        st.subheader("📋 Marking Rules")
+                        st.info("""
+                        💡 **Rule Types (Auto-detected):**
+                        - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
+                        - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
+                        - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
+                        """)
+                        
+                        # Display existing rules
+                        existing_rules = question.get("marking_scheme", [])
+                        rules = []
+                        rule_count = st.number_input(
+                            "How many marking rules?", 
+                            min_value=1, 
+                            value=len(existing_rules) if existing_rules else 1,
+                            key="edit_question_rule_count"
+                        )
+                        
+                        for i in range(rule_count):
+                            default_rule = existing_rules[i].get("text", "") if i < len(existing_rules) else ""
+                            rule = st.text_input(
+                                f"Rule {i + 1}", 
+                                value=default_rule,
+                                key=f"edit_question_rule_{i}"
+                            )
+                            if rule:
+                                # Show rule type using dynamic detection
+                                rule_type = detect_rule_type(rule)
+                                icons = {
+                                    "exact_phrase": "🔍",
+                                    "contains_keywords": "🔑", 
+                                    "semantic": "🧠"
+                                }
+                                st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
+                            rules.append(rule)
+                        
+                        submitted = st.form_submit_button("💾 Update Question")
+                        
+                        if submitted:
+                            if not question_text or not sample_answer:
+                                st.error("❌ Question text and sample answer are required")
+                            else:
+                                success, message = update_question(
+                                    question_id, question_text, sample_answer, rules, st.session_state.user["_id"]
+                                )
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    # Clear cached grading results when question is updated
+                                    if 'grading_results' in st.session_state:
+                                        del st.session_state.grading_results
+                                    # Reset form and exit edit mode
+                                    st.session_state.show_question_edit = False
+                                    st.session_state.edit_question_id = None
+                                    reset_form_on_success("edit_question_")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                    
+                    if st.button("❌ Cancel Edit"):
+                        st.session_state.show_question_edit = False
+                        st.session_state.edit_question_id = None
+                        st.rerun()
 
     elif page == "Test Management":
         st.header("📋 Test Management")
@@ -477,31 +642,37 @@ def main_app():
                                 st.metric("📈 Avg Score", f"{avg_score:.1f}%")
                         
                         # Action buttons in a clean row
-                        col1, col2, col3, col4 = st.columns(4)
+                        col1, col2, col3, col4, col5 = st.columns(5)
                         
                         with col1:
-                            if st.button("🗑️ Delete", key=f"delete_{test_id}"):
-                                st.session_state.delete_test_id = test_id
+                            if st.button("📋 Details", key=f"details_{test_id}"):
+                                st.session_state.selected_test_id = test_id
+                                st.session_state.show_test_details = True
                                 st.rerun()
                         
                         with col2:
+                            if st.button("✏️ Edit", key=f"edit_test_{test_id}"):
+                                st.session_state.edit_test_id = test_id
+                                st.session_state.show_test_edit = True
+                                st.rerun()
+                        
+                        with col3:
                             if len(test_answers) > 0:
                                 if st.button("📊 Results", key=f"results_{test_id}"):
                                     st.session_state.selected_test_id = test_id
                                     st.session_state.show_test_results = True
                                     st.rerun()
                         
-                        with col3:
+                        with col4:
                             if len(test_answers) > 0 and len(test_grades) == 0:
                                 if st.button("🎯 Grade", key=f"grade_{test_id}"):
                                     st.session_state.selected_test_id = test_id
                                     st.session_state.grade_test = True
                                     st.rerun()
                         
-                        with col4:
-                            if st.button("📋 Details", key=f"details_{test_id}"):
-                                st.session_state.selected_test_id = test_id
-                                st.session_state.show_test_details = True
+                        with col5:
+                            if st.button("🗑️ Delete", key=f"delete_{test_id}"):
+                                st.session_state.delete_test_id = test_id
                                 st.rerun()
                 
                 # Handle delete confirmation
@@ -786,6 +957,85 @@ def main_app():
                 if st.button("🔙 Back to Test Management", key="back_from_details"):
                     st.session_state.show_test_details = False
                     st.session_state.selected_test_id = None
+                    st.rerun()
+        
+        # Handle test edit form
+        if st.session_state.get('show_test_edit', False) and st.session_state.get('edit_test_id'):
+            test_id = st.session_state.edit_test_id
+            test = get_test_by_id(test_id, st.session_state.user["_id"])
+            
+            if test:
+                st.subheader("✏️ Edit Test")
+                
+                # Check for form reset
+                clear_form_fields_on_reset("edit_test_")
+                
+                with st.form("edit_test_form"):
+                    test_name = st.text_input(
+                        "Test Name", 
+                        value=test["test_name"],
+                        key="edit_test_name"
+                    )
+                    test_description = st.text_area(
+                        "Test Description (Optional)", 
+                        value=test.get("test_description", ""),
+                        key="edit_test_description"
+                    )
+                    
+                    st.subheader("📋 Select Questions for this Test")
+                    st.info("💡 Select the questions you want to include in this test. Students will need to answer all selected questions.")
+                    
+                    # Get available questions
+                    questions = get_questions(st.session_state.user["_id"])
+                    if not questions:
+                        st.error("❌ No questions found. Please create questions first.")
+                    else:
+                        # Display questions with checkboxes
+                        selected_questions = []
+                        current_question_ids = set(test.get("question_ids", []))
+                        
+                        for i, question in enumerate(questions):
+                            question_text = question["question"]
+                            question_id = str(question["_id"])
+                            
+                            # Check if this question is currently selected
+                            is_selected = question_id in current_question_ids
+                            
+                            # Create a unique key for each checkbox
+                            checkbox_key = f"edit_test_question_{question_id}"
+                            if st.checkbox(
+                                f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", 
+                                value=is_selected,
+                                key=checkbox_key
+                            ):
+                                selected_questions.append(question_id)
+                        
+                        st.write(f"**Selected Questions:** {len(selected_questions)}")
+                        
+                        submitted = st.form_submit_button("💾 Update Test")
+                        
+                        if submitted:
+                            if not test_name:
+                                st.error("❌ Test name is required")
+                            elif not selected_questions:
+                                st.error("❌ Please select at least one question")
+                            else:
+                                success, message = update_test(
+                                    test_id, test_name, test_description, selected_questions, st.session_state.user["_id"]
+                                )
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    # Reset form and exit edit mode
+                                    st.session_state.show_test_edit = False
+                                    st.session_state.edit_test_id = None
+                                    reset_form_on_success("edit_test_")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                
+                if st.button("❌ Cancel Edit"):
+                    st.session_state.show_test_edit = False
+                    st.session_state.edit_test_id = None
                     st.rerun()
 
     elif page == "Upload Answers":
@@ -1530,6 +1780,16 @@ if 'show_test_results' not in st.session_state:
     st.session_state.show_test_results = False
 if 'grade_test' not in st.session_state:
     st.session_state.grade_test = False
+if 'edit_question_id' not in st.session_state:
+    st.session_state.edit_question_id = None
+if 'show_question_edit' not in st.session_state:
+    st.session_state.show_question_edit = False
+if 'delete_question_id' not in st.session_state:
+    st.session_state.delete_question_id = None
+if 'edit_test_id' not in st.session_state:
+    st.session_state.edit_test_id = None
+if 'show_test_edit' not in st.session_state:
+    st.session_state.show_test_edit = False
 
 
 
