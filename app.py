@@ -19,8 +19,18 @@ def set_session_token(token):
     st.session_state.token = token
 
 def get_session_token():
-    """Retrieve session token from session state."""
-    return st.session_state.get('token', None)
+    """Retrieve session token from session state or query parameters."""
+    # First try session state
+    token = st.session_state.get('token', None)
+    
+    # If not in session state, try query parameters (fallback for page reloads)
+    if not token:
+        token = st.query_params.get('token', None)
+        if token:
+            # Store in session state for future use
+            st.session_state.token = token
+    
+    return token
 
 def get_session_id():
     """Get or create a unique session ID for this browser tab."""
@@ -46,17 +56,16 @@ def save_session_to_mongo():
         if session:
             update_mongo_session(token, user)
         else:
-            payload = verify_session_token(token)
-            if payload:
-                create_mongo_session(payload['user_id'], payload['username'], token)
-                update_mongo_session(token, user)
+            # Create new MongoDB session
+            create_mongo_session(user["_id"], user["username"], token)
+            update_mongo_session(token, user)
 
 def refresh_session_if_needed():
     """Check and refresh session if it's about to expire."""
     token = get_session_token()
     if token:
         session_info = get_session_info(token)
-        if session_info and not session_info['is_expired']:
+        if session_info:
             time_remaining = int(session_info['expires_at'] - time.time())
             if time_remaining < 600:  # If less than 10 minutes remain
                 refreshed_token = refresh_session_token(token)
@@ -92,17 +101,21 @@ def initialize_session():
         # First check if session exists in MongoDB
         mongo_session = get_mongo_session(token)
         if mongo_session:
-            # Session exists in MongoDB, verify token
-            payload = verify_session_token(token)
-            if payload:
-                user = get_user_by_id(ObjectId(payload['user_id']))
+            # Session exists in MongoDB, get user data
+            user_id = mongo_session.get('user_id')
+            if user_id:
+                user = get_user_by_id(user_id)
                 if user:
                     set_session_user(user)
                     # Update session activity
                     update_mongo_session(token, user)
                     return
+                else:
+                    # User not found, clear session
+                    delete_mongo_session(token)
+                    clear_session()
             else:
-                # Token is invalid, clear MongoDB session
+                # No user_id in session, clear it
                 delete_mongo_session(token)
                 clear_session()
         else:
@@ -116,15 +129,16 @@ def check_auth():
         # Check MongoDB session first
         mongo_session = get_mongo_session(token)
         if mongo_session:
+            # Session exists in MongoDB, check if it's still valid
             session_info = get_session_info(token)
             if session_info and not session_info['is_expired']:
                 return True
             else:
-                # Try to refresh session
+                # Session expired, try to refresh
                 if refresh_session_if_needed():
                     return True
                 else:
-                    # Session expired, clean up
+                    # Session expired and couldn't refresh, clean up
                     delete_mongo_session(token)
                     clear_session()
                     return False
@@ -133,6 +147,12 @@ def check_auth():
             clear_session()
             return False
     return False
+
+def set_session_persistent():
+    """Set session token in query parameters for persistence across page reloads."""
+    token = get_session_token()
+    if token:
+        st.query_params["token"] = token
 
 # --- End Session Management ---
 
@@ -153,6 +173,7 @@ def login_page():
                     if token:
                         set_session_token(token)  # Store session in session state
                         save_session_to_mongo()  # Save to MongoDB for persistence
+                        set_session_persistent()  # Set in query params for persistence
                         st.success("Login successful!")
                         st.rerun()  # Re-run the app to initialize session state
                     else:
@@ -205,6 +226,8 @@ def logout():
     clear_session()
     st.session_state.token = None
     st.session_state.user = None
+    # Clear query parameters
+    st.query_params.clear()
     st.rerun()
 
 # --- Main App ---
@@ -226,12 +249,21 @@ def main_app():
                     st.warning(f"🟡 Session expires in {time_remaining//60}m")
                 else:
                     st.error(f"🔴 Session expires in {time_remaining}s")
+        
+        # Session persistence indicator
+        token = get_session_token()
+        if token:
+            if 'token' in st.query_params:
+                st.info("🔗 Session persisted (will survive page reloads)")
+            else:
+                st.warning("⚠️ Session not persisted (may be lost on reload)")
     with col3:
         if st.button("🔄 Refresh Session"):
             refreshed_token = refresh_session_token(st.session_state.token)
             if refreshed_token:
                 set_session_token(refreshed_token)
                 save_session_to_mongo()
+                set_session_persistent()
                 st.success("Session refreshed!")
                 st.rerun()
             else:
@@ -1339,17 +1371,65 @@ if 'grade_test' not in st.session_state:
 
 # Main app logic
 def main():
+    # Debug mode - set to True to see session debugging info
+    DEBUG_SESSION = False
+    
+    if DEBUG_SESSION:
+        print("Starting main app")
+        print("--------------------------------")
+        print("Session state:", {k: v for k, v in st.session_state.items() if k in ['token', 'user', 'session_id']})
+        print("Query params:", dict(st.query_params))
+    
     # Initialize session
+    if DEBUG_SESSION:
+        print("Initializing session")
+        print("--------------------------------")
     initialize_session()
-
+    if DEBUG_SESSION:
+        print("Session initialized")
+        print("--------------------------------")
+        token = get_session_token()
+        print("Token after init:", token[:20] + "..." if token else "None")
+        user = get_session_user()
+        print("User after init:", user['username'] if user else "None")
+        print("Checking auth")
+        print("--------------------------------")
+    
     if check_auth():
+        if DEBUG_SESSION:
+            print("Auth checked - SUCCESS")
+            print("--------------------------------")
         refresh_session_if_needed()
+        if DEBUG_SESSION:
+            print("Session refreshed")
+            print("--------------------------------")
         main_app()
+        if DEBUG_SESSION:
+            print("Main app finished")
+            print("--------------------------------")
     else:
+        if DEBUG_SESSION:
+            print("Auth failed")
+            print("--------------------------------")
         if st.session_state.get('show_signup', False):
+            if DEBUG_SESSION:
+                print("Showing signup page")
+                print("--------------------------------")
             signup_page()
+            if DEBUG_SESSION:
+                print("Signup page finished")
+                print("--------------------------------")
         else:
+            if DEBUG_SESSION:
+                print("Showing login page")
+                print("--------------------------------")
             login_page()
+            if DEBUG_SESSION:
+                print("Login page showed")
+                print("--------------------------------")
+    if DEBUG_SESSION:
+        print("end of main")
+        print("--------------------------------")
 
 # Run the main app
 if __name__ == "__main__":

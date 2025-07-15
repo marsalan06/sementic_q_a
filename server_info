@@ -1,18 +1,643 @@
-docker pull mongo
+# Function Call Flow & Working Process
 
-docker run -d \
-  --name semantic-mongo \
-  -p 27017:27017 \
-  -v mongodata:/data/db \
-  mongo
+## 🔄 Application Startup Flow
 
+### Main Entry Point
+```
+main() 
+├── DEBUG_SESSION = False (debug logging)
+├── initialize_session() 
+│   ├── get_session_id() (create unique tab ID)
+│   ├── get_session_token() 
+│   │   ├── st.session_state.get('token', None)
+│   │   └── st.query_params.get('token', None) (fallback)
+│   ├── get_mongo_session(token) 
+│   ├── get_user_by_id(user_id) 
+│   ├── set_session_user(user) 
+│   └── update_mongo_session(token, user)
+├── check_auth() 
+│   ├── get_session_token() 
+│   ├── get_mongo_session(token) 
+│   ├── get_session_info(token) 
+│   ├── refresh_session_if_needed() (if expiring)
+│   └── delete_mongo_session(token) (if expired)
+├── refresh_session_if_needed() 
+│   ├── get_session_info(token) 
+│   ├── refresh_session_token(token) 
+│   ├── set_session_token(refreshed_token) 
+│   ├── save_session_to_mongo() 
+│   └── set_session_persistent()
+└── main_app() OR login_page() OR signup_page()
+```
 
-Start a container named semantic-mongo
+---
 
-Bind MongoDB to port 27017
+## 🔐 Login Flow
 
-Persist data in a Docker volume mongodata
+### User Authentication Process
+```
+login_page() 
+├── st.form("login_form") 
+├── authenticate_user(username, password) 
+│   ├── get_db() 
+│   ├── db.users.find_one({"username": username}) 
+│   ├── verify_password(password, hashed) 
+│   ├── bcrypt.checkpw() 
+│   └── db.users.update_one() (update last_login)
+├── set_session_user(user) 
+├── create_session_token(user["_id"], user["username"]) 
+│   ├── jwt.encode(payload, JWT_SECRET, algorithm="HS256") 
+│   └── payload = {user_id, username, exp, iat}
+├── set_session_token(token) 
+├── save_session_to_mongo() 
+│   ├── get_mongo_session(token) 
+│   ├── update_mongo_session(token, user) 
+│   └── create_mongo_session(user["_id"], user["username"], token) 
+│       ├── cleanup_expired_sessions() 
+│       ├── db.sessions.insert_one(session) 
+│       └── session = {user_id, username, token, created_at, expires_at, is_active}
+├── set_session_persistent() 
+│   └── st.query_params["token"] = token
+└── st.rerun()
+```
 
-docker exec -it semantic-mongo mongosh
+---
+
+## 🔄 Session Restoration Flow (Page Reload)
+
+### Token Retrieval & Validation
+```
+get_session_token() 
+├── token = st.session_state.get('token', None) 
+├── if not token: 
+│   └── token = st.query_params.get('token', None) 
+│       └── st.session_state.token = token (store for future)
+└── return token
+
+initialize_session() 
+├── get_session_id() 
+├── token = get_session_token() 
+├── if token: 
+│   ├── mongo_session = get_mongo_session(token) 
+│   │   ├── db.sessions.find_one({token, is_active, expires_at > now}) 
+│   │   └── db.sessions.update_one() (update last_activity)
+│   ├── user_id = mongo_session.get('user_id') 
+│   ├── user = get_user_by_id(user_id) 
+│   │   └── db.users.find_one({"_id": user_id}) 
+│   ├── set_session_user(user) 
+│   └── update_mongo_session(token, user)
+└── else: clear_session()
+```
+
+---
+
+## ✅ Authentication Check Flow
+
+### Session Validation Process
+```
+check_auth() 
+├── token = get_session_token() 
+├── if token: 
+│   ├── mongo_session = get_mongo_session(token) 
+│   ├── if mongo_session: 
+│   │   ├── session_info = get_session_info(token) 
+│   │   │   └── jwt.decode(token, options={"verify_exp": False}) 
+│   │   ├── if session_info and not session_info['is_expired']: 
+│   │   │   └── return True 
+│   │   ├── else: 
+│   │   │   ├── refresh_session_if_needed() 
+│   │   │   │   ├── session_info = get_session_info(token) 
+│   │   │   │   ├── time_remaining = expires_at - now 
+│   │   │   │   ├── if time_remaining < 600: 
+│   │   │   │   │   ├── refreshed_token = refresh_session_token(token) 
+│   │   │   │   │   ├── set_session_token(refreshed_token) 
+│   │   │   │   │   ├── save_session_to_mongo() 
+│   │   │   │   │   └── set_session_persistent() 
+│   │   │   │   └── return True 
+│   │   │   ├── delete_mongo_session(token) 
+│   │   │   └── clear_session() 
+│   │   └── return False 
+│   └── else: 
+│       ├── clear_session() 
+│       └── return False 
+└── return False
+```
+
+---
+
+## 🔄 Session Refresh Flow
+
+### Automatic Token Renewal
+```
+refresh_session_if_needed() 
+├── token = get_session_token() 
+├── if token: 
+│   ├── session_info = get_session_info(token) 
+│   ├── if session_info: 
+│   │   ├── time_remaining = expires_at - now 
+│   │   ├── if time_remaining < 600: 
+│   │   │   ├── refreshed_token = refresh_session_token(token) 
+│   │   │   │   ├── jwt.decode(token, options={"verify_exp": False}) 
+│   │   │   │   ├── if time_until_expiry > 300: 
+│   │   │   │   │   └── create_session_token(user_id, username) 
+│   │   │   │   └── return None 
+│   │   │   ├── set_session_token(refreshed_token) 
+│   │   │   ├── save_session_to_mongo() 
+│   │   │   └── set_session_persistent() 
+│   │   │   └── return True 
+│   │   └── return False 
+└── return False
+```
+
+---
+
+## 🚪 Logout Flow
+
+### Complete Session Cleanup
+```
+logout() 
+├── clear_session() 
+│   ├── token = get_session_token() 
+│   ├── if token: 
+│   │   └── delete_mongo_session(token) 
+│   │       └── db.sessions.update_one({token}, {"is_active": False}) 
+│   ├── st.session_state.token = None 
+│   └── st.session_state.user = None 
+├── st.session_state.token = None 
+├── st.session_state.user = None 
+├── st.query_params.clear() 
+└── st.rerun()
+```
+
+---
+
+## 🔧 MongoDB Session Management
+
+### Session Storage Operations
+```
+create_mongo_session(user_id, username, token) 
+├── cleanup_expired_sessions() 
+│   ├── db.sessions.update_many({expires_at < now, is_active: true}, {"is_active": false}) 
+│   └── db.sessions.delete_many({created_at < 30_days_ago}) 
+├── session = {user_id, username, token, created_at, last_activity, expires_at, is_active} 
+└── db.sessions.insert_one(session)
+
+get_mongo_session(token) 
+├── db.sessions.find_one({token, is_active: true, expires_at > now}) 
+└── db.sessions.update_one({_id}, {"last_activity": now})
+
+update_mongo_session(token, user_data) 
+├── update_data = {"last_activity": now} 
+├── if user_data: 
+│   └── update_data["user_data"] = user_data 
+└── db.sessions.update_one({token, is_active: true}, {"$set": update_data})
+
+delete_mongo_session(token) 
+└── db.sessions.update_one({token}, {"is_active": false})
+```
+
+---
+
+## 🎯 Main App Session Display
+
+### Session Status Indicators
+```
+main_app() 
+├── col1, col2, col3, col4 = st.columns([3, 1, 1, 1]) 
+├── with col1: 
+│   └── st.title("🎓 Scorix") 
+├── with col2: 
+│   ├── st.write(f"Welcome, {user['username']}!") 
+│   ├── session_info = get_session_info(st.session_state.token) 
+│   ├── if session_info: 
+│   │   ├── if session_info['is_expired']: 
+│   │   │   └── st.error("⚠️ Session expired") 
+│   │   ├── else: 
+│   │   │   ├── time_remaining = expires_at - now 
+│   │   │   ├── if time_remaining > 3600: 
+│   │   │   │   └── st.success("🟢 Session active (Xh Ym)") 
+│   │   │   ├── elif time_remaining > 300: 
+│   │   │   │   └── st.warning("🟡 Session expires in Xm") 
+│   │   │   └── else: 
+│   │   │       └── st.error("🔴 Session expires in Xs") 
+│   ├── token = get_session_token() 
+│   ├── if token: 
+│   │   ├── if 'token' in st.query_params: 
+│   │   │   └── st.info("🔗 Session persisted") 
+│   │   └── else: 
+│   │       └── st.warning("⚠️ Session not persisted") 
+├── with col3: 
+│   └── st.button("🔄 Refresh Session") 
+│       ├── refreshed_token = refresh_session_token(st.session_state.token) 
+│       ├── set_session_token(refreshed_token) 
+│       ├── save_session_to_mongo() 
+│       ├── set_session_persistent() 
+│       ├── st.success("Session refreshed!") 
+│       └── st.rerun() 
+└── with col4: 
+    └── st.button("🚪 Logout") 
+        └── logout()
+```
+
+---
+
+## 🔍 Debug Flow
+
+### Session Troubleshooting
+```
+main() (with DEBUG_SESSION = True) 
+├── print("Session state:", {token, user, session_id}) 
+├── print("Query params:", dict(st.query_params)) 
+├── initialize_session() 
+├── print("Token after init:", token[:20] + "...") 
+├── print("User after init:", user['username']) 
+├── check_auth() 
+├── print("Auth checked - SUCCESS/FAILED") 
+├── refresh_session_if_needed() 
+├── print("Session refreshed") 
+├── main_app() 
+└── print("Main app finished")
+```
+
+---
+
+## 📋 Test Management Flow
+
+### Test Creation Process
+```
+main_app() -> Test Management -> Create Test
+├── get_questions(user_id) 
+├── st.form("create_test_form") 
+├── test_name = st.text_input() 
+├── test_description = st.text_area() 
+├── for question in questions: 
+│   └── st.checkbox() (select questions) 
+├── submitted = st.form_submit_button() 
+├── if submitted: 
+│   ├── validate test_name and selected_questions 
+│   ├── save_test(test_name, description, question_ids, user_id) 
+│   └── st.rerun()
+```
+
+### Test Answer Upload
+```
+main_app() -> Test Management -> Upload Test Answers
+├── get_tests(user_id) 
+├── selected_test = st.selectbox() 
+├── get_test_by_id(test_id, user_id) 
+├── Manual Entry: 
+│   ├── st.form("manual_test_answer_form") 
+│   ├── student_name = st.text_input() 
+│   ├── student_roll_no = st.text_input() 
+│   ├── for question in test_questions: 
+│   │   └── answer = st.text_area() 
+│   ├── save_test_answer(name, roll, test_id, answers, user_id) 
+│   └── st.rerun()
+├── CSV Upload: 
+│   ├── uploaded_file = st.file_uploader() 
+│   ├── import_export_service.import_test_answers_from_csv() 
+│   └── st.rerun()
+```
+
+### Test Grading Process
+```
+main_app() -> Test Management -> Grade Tests
+├── get_tests(user_id) 
+├── selected_test = st.selectbox() 
+├── get_test_answers(user_id, test_id) 
+├── get_test_grades(user_id, test_id) 
+├── debug_mode = st.checkbox() 
+├── st.button("Grade Test & Save Results") 
+│   ├── clear_test_grades(user_id, test_id) 
+│   ├── grade_test(test_id, user_id, debug=debug_mode) 
+│   ├── save_test_grades(results, user_id) 
+│   └── st.rerun()
+├── if test_grades exist: 
+│   ├── get_test_statistics(test_id, user_id) 
+│   ├── display metrics (total_students, average_percentage, etc.) 
+│   └── display grade_distribution (A, B, C, D, F)
+```
+
+---
+
+## 📤 Data Management Flow
+
+### Export Process
+```
+main_app() -> Data Management -> Export All Data
+├── st.button("Export All Data as ZIP") 
+├── import_export_service.export_questions_to_csv() 
+├── import_export_service.export_student_answers_to_csv() 
+├── import_export_service.export_grades_to_csv() 
+├── import_export_service.export_tests_to_csv() 
+├── import_export_service.export_test_answers_to_csv() 
+├── import_export_service.export_test_grades_to_csv() 
+├── zipfile.ZipFile() 
+├── zf.writestr() (add each CSV to ZIP) 
+├── st.download_button() 
+└── st.success("All data exported successfully!")
+```
+
+### Import Process
+```
+main_app() -> Data Management -> Import Answers
+├── get_questions(user_id) 
+├── selected_question = st.selectbox() 
+├── uploaded_file = st.file_uploader() 
+├── st.button("Import Answers") 
+│   ├── file_content = uploaded_file.read().decode('utf-8') 
+│   ├── import_export_service.import_student_answers_from_csv() 
+│   ├── display success/error messages 
+│   ├── display error details if any 
+│   └── st.rerun()
+```
+
+### Bulk Operations
+```
+main_app() -> Data Management -> Bulk Operations
+├── Display current data counts 
+├── Clear Student Answers: 
+│   ├── confirm_answers = st.checkbox() 
+│   ├── st.form("clear_answers_form_bulk") 
+│   ├── db.answers.delete_many({"user_id": user_id}) 
+│   └── st.success("Deleted X student answers")
+├── Clear Grades: 
+│   ├── confirm_grades = st.checkbox() 
+│   ├── st.form("clear_grades_form_bulk") 
+│   ├── db.grades.delete_many({"user_id": user_id}) 
+│   └── st.success("Deleted X grades")
+├── Clear Test Grades: 
+│   ├── confirm_test_grades = st.checkbox() 
+│   ├── st.form("clear_test_grades_form_bulk") 
+│   ├── clear_test_grades(user_id) 
+│   └── st.success("Cleared test grades")
+└── Clear Test Answers: 
+    ├── confirm_test_answers = st.checkbox() 
+    ├── st.form("clear_test_answers_form_bulk") 
+    ├── db.test_answers.delete_many({"user_id": user_id}) 
+    └── st.success("Deleted X test answers")
+```
+
+---
+
+## 🎯 Grading Flow
+
+### Individual Question Grading
+```
+main_app() -> Run Grading
+├── get_grade_thresholds(user_id) 
+├── display current thresholds 
+├── debug_mode = st.checkbox() 
+├── st.button("Run Grading & Save to DB") 
+│   ├── clear_grades(user_id) 
+│   ├── grade_all(debug=debug_mode, user_id=user_id) 
+│   ├── save_grades(results, user_id) 
+│   └── st.session_state.grading_results = results
+├── get_questions(user_id) 
+├── get_student_answers(user_id) 
+├── get_grades(user_id) 
+├── selected_question = st.selectbox() 
+├── for question in questions: 
+│   ├── filter answers for this question 
+│   ├── filter grades for this question 
+│   ├── group answers by grade (A, B, C, D, F) 
+│   ├── display question details in expander 
+│   ├── for grade_category in grades: 
+│   │   ├── display grade header 
+│   │   ├── for answer in grade_answers: 
+│   │   │   ├── st.expander(student_name + score) 
+│   │   │   ├── st.text_area(student_answer) 
+│   │   │   ├── display score and grade 
+│   │   │   ├── display matched_rules 
+│   │   │   └── display missed_rules 
+│   │   └── st.divider()
+```
+
+### Test Grading Process
+```
+grade_test(test_id, user_id, debug=False)
+├── get_test_by_id(test_id, user_id) 
+├── get_test_answers(user_id, test_id) 
+├── get_questions(user_id) 
+├── results = [] 
+├── for test_answer in test_answers: 
+│   ├── student_name = test_answer.student_name 
+│   ├── student_roll = test_answer.student_roll_no 
+│   ├── question_details = [] 
+│   ├── total_score = 0 
+│   ├── answered_questions = 0 
+│   ├── for question_id in test.question_ids: 
+│   │   ├── question = find_question_by_id(question_id) 
+│   │   ├── answer = test_answer.question_answers.get(question_id) 
+│   │   ├── if answer: 
+│   │   │   ├── grade_question(question, answer, debug) 
+│   │   │   ├── question_details.append(result) 
+│   │   │   ├── total_score += result.score 
+│   │   │   └── answered_questions += 1 
+│   │   └── else: 
+│   │       └── question_details.append(default_result)
+│   ├── overall_percentage = total_score / len(test.question_ids) 
+│   ├── overall_grade = calculate_grade(overall_percentage, thresholds) 
+│   ├── result = {student_name, student_roll, overall_percentage, overall_grade, question_details} 
+│   └── results.append(result)
+└── return results
+```
+
+---
+
+## 🔧 Configuration Flow
+
+### Grade Settings Management
+```
+main_app() -> Grade Settings
+├── get_grade_thresholds(user_id) 
+├── display current thresholds in metrics 
+├── st.form("grade_thresholds_form") 
+│   ├── a_threshold = st.number_input() 
+│   ├── b_threshold = st.number_input() 
+│   ├── c_threshold = st.number_input() 
+│   ├── d_threshold = st.number_input() 
+│   ├── validate thresholds (A > B > C > D) 
+│   ├── display preview with deltas 
+│   ├── submitted = st.form_submit_button() 
+│   ├── if submitted: 
+│   │   ├── save_grade_thresholds(new_thresholds, user_id) 
+│   │   └── st.rerun()
+├── Quick Presets: 
+│   ├── st.button("Standard (85/70/55/40)") 
+│   ├── st.button("Strict (90/80/70/60)") 
+│   └── st.button("Lenient (80/65/50/35)")
+```
+
+---
+
+## 📊 Database Operations Flow
+
+### Question Management
+```
+save_question(question, sample_answer, rules, user_id)
+├── get_db() 
+├── question_doc = {question, sample_answer, marking_scheme, user_id, created_at} 
+├── for rule in rules: 
+│   ├── rule_type = detect_rule_type(rule) 
+│   └── marking_scheme.append({text: rule, type: rule_type})
+├── db.questions.insert_one(question_doc) 
+└── return success, message
+
+get_questions(user_id)
+├── get_db() 
+└── db.questions.find({"user_id": user_id}).sort("created_at", -1)
+```
+
+### Answer Management
+```
+save_student_answer(name, roll_no, answer, question_id, user_id)
+├── get_db() 
+├── answer_doc = {student_name, student_roll_no, student_answer, question_id, user_id, created_at} 
+├── db.answers.insert_one(answer_doc) 
+└── return success, message
+
+get_student_answers(user_id)
+├── get_db() 
+└── db.answers.find({"user_id": user_id}).sort("created_at", -1)
+```
+
+### Grade Management
+```
+save_grades(results, user_id)
+├── get_db() 
+├── for result in results: 
+│   ├── grade_doc = {question_id, student_roll_no, score, grade, matched_rules, missed_rules, user_id} 
+│   └── db.grades.insert_one(grade_doc) 
+└── return success, message
+
+get_grades(user_id)
+├── get_db() 
+└── db.grades.find({"user_id": user_id}).sort("created_at", -1)
+```
+
+---
+
+## 🔍 Error Handling Flow
+
+### Session Errors
+```
+check_auth() -> Error Cases
+├── No token: return False 
+├── Invalid token: clear_session(), return False 
+├── Expired token: try refresh, if fails: clear_session(), return False 
+├── MongoDB connection error: clear_session(), return False 
+└── User not found: delete_mongo_session(), clear_session(), return False
+```
+
+### Grading Errors
+```
+grade_all() -> Error Cases
+├── No questions: return None 
+├── No answers: return None 
+├── Database error: log error, return None 
+├── Model loading error: log error, return None 
+└── Individual grading error: continue with next answer
+```
+
+### Import/Export Errors
+```
+import_student_answers_from_csv() -> Error Cases
+├── Invalid CSV format: return error message 
+├── Missing required columns: return error message 
+├── Invalid question_id: return error message 
+├── Database error: return error message 
+└── Partial success: return success with error list
+```
+
+---
+
+## 🚀 Performance Considerations
+
+### Session Optimization
+- **MongoDB Indexing**: Index on token, user_id, expires_at
+- **Session Cleanup**: Automatic cleanup of expired sessions
+- **Connection Pooling**: Reuse database connections
+- **Caching**: Cache frequently accessed user data
+
+### Grading Optimization
+- **Batch Processing**: Process multiple answers together
+- **Model Caching**: Cache loaded AI models
+- **Parallel Processing**: Use threading for large datasets
+- **Memory Management**: Clear unused variables
+
+### Database Optimization
+- **Indexing**: Index on user_id, created_at, question_id
+- **Aggregation**: Use MongoDB aggregation for statistics
+- **Connection Management**: Proper connection pooling
+- **Query Optimization**: Limit and sort efficiently
+
+---
+
+## 🔧 Debugging Tools
+
+### Session Debugging
+```python
+DEBUG_SESSION = True  # Enable in main()
+# Outputs: Session state, query params, token info, user info, auth status
+```
+
+### Grading Debugging
+```python
+debug = True  # Enable in grading functions
+# Outputs: Rule extraction, matching details, similarity scores, rule types
+```
+
+### Database Debugging
+```python
+# Check collections and documents
+db.users.find().count()
+db.sessions.find({"is_active": True}).count()
+db.questions.find({"user_id": user_id}).count()
+```
+
+---
+
+## 📈 Monitoring Points
+
+### Session Health
+- Active sessions count
+- Session expiration rates
+- Failed authentication attempts
+- Session refresh success rate
+
+### Grading Performance
+- Average grading time per answer
+- Model loading times
+- Memory usage during grading
+- Error rates in grading
+
+### Database Performance
+- Query response times
+- Connection pool usage
+- Index effectiveness
+- Storage growth rate
+
+---
+
+## 🛡️ Security Checkpoints
+
+### Authentication Security
+- JWT token validation
+- Password hash verification
+- Session expiration enforcement
+- User data isolation
+
+### Data Security
+- Input validation and sanitization
+- SQL injection prevention
+- XSS protection
+- CSRF protection
+
+### Session Security
+- Token encryption
+- Session hijacking prevention
+- Secure logout process
+- Session fixation protection
 
 
