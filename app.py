@@ -377,7 +377,7 @@ def main_app():
         st.header("📋 Test Management")
         
         # Create tabs for different test operations
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Create Test", "📊 Test Overview", "📤 Upload Test Answers", "🎯 Grade Tests"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📝 Create Test", "📊 Test Overview", "📤 Upload Answers", "🎯 Grade Tests"])
         
         with tab1:
             st.subheader("📝 Create a New Test")
@@ -433,7 +433,7 @@ def main_app():
             if not tests:
                 st.info("ℹ️ No tests created yet. Create your first test in the 'Create Test' tab.")
             else:
-                # Display tests in a table format
+                # Display tests in a clean card format
                 for test in tests:
                     test_id = str(test["_id"])
                     test_name = test["test_name"]
@@ -445,78 +445,85 @@ def main_app():
                     test_answers = get_test_answers(st.session_state.user["_id"], test_id)
                     test_grades = get_test_grades(st.session_state.user["_id"], test_id)
                     
-                    with st.expander(f"📋 {test_name} ({question_count} questions)", expanded=False):
-                        col1, col2 = st.columns([3, 1])
+                    # Create a clean card layout
+                    with st.container():
+                        st.markdown("---")
+                        col1, col2, col3 = st.columns([3, 1, 1])
                         
                         with col1:
-                            st.write(f"**Description:** {test_description or 'No description'}")
+                            st.markdown(f"### 📋 {test_name}")
+                            if test_description:
+                                st.caption(f"*{test_description}*")
                             st.write(f"**Created:** {created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'}")
-                            st.write(f"**Status:** {'🟢 Active' if test.get('is_active', True) else '🔴 Inactive'}")
                         
                         with col2:
                             st.metric("📝 Submissions", len(test_answers))
                             st.metric("📊 Graded", len(test_grades))
                         
-                        # Show questions in this test
-                        st.subheader("📋 Questions in this Test")
-                        question_ids = test.get("question_ids", [])
-                        for i, qid in enumerate(question_ids, 1):
-                            question = next((q for q in questions if str(q["_id"]) == qid), None)
-                            if question:
-                                st.write(f"**Q{i}:** {question['question'][:100]}{'...' if len(question['question']) > 100 else ''}")
+                        with col3:
+                            st.metric("📋 Questions", question_count)
+                            if len(test_answers) > 0 and len(test_grades) > 0:
+                                # Handle percentage values that might be strings
+                                total_score = 0
+                                for g in test_grades:
+                                    score = g.get('overall_percentage', 0)
+                                    if isinstance(score, str):
+                                        # Remove % and convert to float
+                                        score = float(score.replace('%', ''))
+                                    else:
+                                        score = float(score)
+                                    total_score += score
+                                avg_score = total_score / len(test_grades)
+                                st.metric("📈 Avg Score", f"{avg_score:.1f}%")
                         
-                        # Action buttons
-                        col1, col2, col3 = st.columns(3)
+                        # Action buttons in a clean row
+                        col1, col2, col3, col4 = st.columns(4)
+                        
                         with col1:
-                            # Handle delete with confirmation using session state
-                            delete_key = f"delete_{test_id}"
-                            confirm_key = f"confirm_delete_{test_id}"
-                            
-                            if delete_key not in st.session_state:
-                                st.session_state[delete_key] = False
-                            if confirm_key not in st.session_state:
-                                st.session_state[confirm_key] = False
-                            
-                            if not st.session_state[delete_key]:
-                                if st.button("🗑️ Delete Test", key=f"btn_{delete_key}"):
-                                    st.session_state[delete_key] = True
-                                    st.rerun()
-                            else:
-                                st.warning("⚠️ Are you sure you want to delete this test?")
-                                col_confirm1, col_confirm2 = st.columns(2)
-                                with col_confirm1:
-                                    if st.button("✅ Yes, Delete", key=f"btn_{confirm_key}"):
-                                        st.info(f"Deleting test {test_id}...")
-                                        success, message = delete_test(test_id, st.session_state.user["_id"])
-                                        if success:
-                                            st.success(f"✅ {message}")
-                                            # Clear session state
-                                            st.session_state[delete_key] = False
-                                            st.session_state[confirm_key] = False
-                                            st.rerun()
-                                        else:
-                                            st.error(f"❌ {message}")
-                                            st.session_state[delete_key] = False
-                                            st.session_state[confirm_key] = False
-                                with col_confirm2:
-                                    if st.button("❌ Cancel", key=f"btn_cancel_{test_id}"):
-                                        st.session_state[delete_key] = False
-                                        st.session_state[confirm_key] = False
-                                        st.rerun()
+                            if st.button("🗑️ Delete", key=f"delete_{test_id}"):
+                                st.session_state.delete_test_id = test_id
+                                st.rerun()
                         
                         with col2:
                             if len(test_answers) > 0:
-                                if st.button("📊 View Results", key=f"results_{test_id}"):
+                                if st.button("📊 Results", key=f"results_{test_id}"):
                                     st.session_state.selected_test_id = test_id
                                     st.session_state.show_test_results = True
                                     st.rerun()
                         
                         with col3:
                             if len(test_answers) > 0 and len(test_grades) == 0:
-                                if st.button("🎯 Grade Test", key=f"grade_{test_id}"):
+                                if st.button("🎯 Grade", key=f"grade_{test_id}"):
                                     st.session_state.selected_test_id = test_id
                                     st.session_state.grade_test = True
                                     st.rerun()
+                        
+                        with col4:
+                            if st.button("📋 Details", key=f"details_{test_id}"):
+                                st.session_state.selected_test_id = test_id
+                                st.session_state.show_test_details = True
+                                st.rerun()
+                
+                # Handle delete confirmation
+                if st.session_state.get('delete_test_id'):
+                    test_id = st.session_state.delete_test_id
+                    test = get_test_by_id(test_id, st.session_state.user["_id"])
+                    if test:
+                        st.warning(f"⚠️ Are you sure you want to delete '{test['test_name']}'?")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("✅ Yes, Delete"):
+                                success, message = delete_test(test_id, st.session_state.user["_id"])
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    del st.session_state.delete_test_id
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                        with col2:
+                            if st.button("❌ Cancel"):
+                                del st.session_state.delete_test_id
+                                st.rerun()
         
         with tab3:
             st.subheader("📤 Upload Test Answers")
@@ -635,9 +642,28 @@ def main_app():
                 
                 if test:
                     st.info(f"📋 **Test:** {test['test_name']}")
-                    st.write(f"**Questions:** {len(test.get('question_ids', []))}")
-                    st.write(f"**Submissions:** {len(test_answers)}")
-                    st.write(f"**Already Graded:** {len(test_grades)}")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("📝 Submissions", len(test_answers))
+                    with col2:
+                        st.metric("📊 Graded", len(test_grades))
+                    with col3:
+                        st.metric("📋 Questions", len(test.get('question_ids', [])))
+                    with col4:
+                        if len(test_grades) > 0:
+                            # Handle percentage values that might be strings
+                            total_score = 0
+                            for g in test_grades:
+                                score = g.get('overall_percentage', 0)
+                                if isinstance(score, str):
+                                    # Remove % and convert to float
+                                    score = float(score.replace('%', ''))
+                                else:
+                                    score = float(score)
+                                total_score += score
+                            avg_score = total_score / len(test_grades)
+                            st.metric("📈 Avg Score", f"{avg_score:.1f}%")
                     
                     if len(test_answers) == 0:
                         st.warning("⚠️ No test answers found. Please upload answers first.")
@@ -697,7 +723,7 @@ def main_app():
             if test and test_grades:
                 st.subheader(f"📊 Test Results: {test['test_name']}")
                 
-                # Display results in a table
+                # Display results in a clean table format
                 for grade in test_grades:
                     student_name = grade.get("student_name", "Unknown")
                     student_roll = grade.get("student_roll_no", "Unknown")
@@ -717,8 +743,48 @@ def main_app():
                             q_grade = q_detail.get("grade", "F")
                             st.write(f"**Q{i}:** {score:.1f}% (Grade {q_grade})")
                 
-                if st.button("🔙 Back to Test Management"):
+                if st.button("🔙 Back to Test Management", key="back_from_results"):
                     st.session_state.show_test_results = False
+                    st.session_state.selected_test_id = None
+                    st.rerun()
+        
+        # Handle test details view
+        if st.session_state.get('show_test_details', False) and st.session_state.get('selected_test_id'):
+            test_id = st.session_state.selected_test_id
+            test = get_test_by_id(test_id, st.session_state.user["_id"])
+            
+            if test:
+                st.subheader(f"📋 Test Details: {test['test_name']}")
+                
+                # Show test information
+                st.write(f"**Description:** {test.get('test_description', 'No description')}")
+                st.write(f"**Created:** {test.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if test.get('created_at') else 'Unknown'}")
+                st.write(f"**Questions:** {len(test.get('question_ids', []))}")
+                
+                # Show questions in this test
+                st.subheader("📝 Questions in this Test")
+                question_ids = test.get("question_ids", [])
+                for i, qid in enumerate(question_ids, 1):
+                    question = next((q for q in questions if str(q["_id"]) == qid), None)
+                    if question:
+                        with st.expander(f"Q{i}: {question['question'][:100]}{'...' if len(question['question']) > 100 else ''}", expanded=False):
+                            st.write(f"**Question:** {question['question']}")
+                            if question.get("sample_answer"):
+                                st.write(f"**Sample Answer:** {question['sample_answer']}")
+                            if question.get("marking_scheme"):
+                                st.write("**Marking Rules:**")
+                                for j, rule in enumerate(question["marking_scheme"], 1):
+                                    rule_text = rule.get("text", "")
+                                    rule_type = rule.get("type", "semantic")
+                                    icons = {
+                                        "exact_phrase": "🔍",
+                                        "contains_keywords": "🔑", 
+                                        "semantic": "🧠"
+                                    }
+                                    st.write(f"{j}. {rule_text} {icons.get(rule_type, '🧠')}")
+                
+                if st.button("🔙 Back to Test Management", key="back_from_details"):
+                    st.session_state.show_test_details = False
                     st.session_state.selected_test_id = None
                     st.rerun()
 
