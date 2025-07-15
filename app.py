@@ -14,6 +14,53 @@ import csv
 st.set_page_config(page_title="Scorix", layout="wide")
 
 # --- Session Management ---
+
+# --- Form Reset Utility ---
+def reset_form_on_success(form_key):
+    """Set a flag to reset form fields on next rerun."""
+    try:
+        st.session_state[f"{form_key}_reset"] = True
+        st.rerun()
+    except Exception as e:
+        # Fallback: just rerun without setting session state
+        st.rerun()
+
+def clear_form_fields_on_reset(form_key):
+    """Clear form fields if reset flag is set."""
+    reset_flag = f"{form_key}_reset"
+    if reset_flag in st.session_state and st.session_state[reset_flag]:
+        try:
+            # Get all session state keys that start with the form key
+            keys_to_clear = [key for key in st.session_state.keys() if isinstance(key, str) and key.startswith(form_key) and not key.endswith("_reset")]
+            for key in keys_to_clear:
+                try:
+                    if isinstance(st.session_state[key], str):
+                        st.session_state[key] = ""
+                    elif isinstance(st.session_state[key], int):
+                        # Set appropriate defaults for number inputs
+                        if key == "question_rule_count":
+                            st.session_state[key] = 1
+                        elif "threshold" in key or "grade" in key:
+                            st.session_state[key] = 85  # Default grade threshold
+                        elif "answer_" in key:
+                            # Skip dynamic answer keys to avoid conflicts
+                            continue
+                        else:
+                            st.session_state[key] = 0
+                    elif isinstance(st.session_state[key], bool):
+                        st.session_state[key] = False
+                except Exception as e:
+                    # Skip this key if there's an error
+                    continue
+            # Clear the reset flag
+            del st.session_state[reset_flag]
+        except Exception as e:
+            # If there's an error, just clear the reset flag
+            if reset_flag in st.session_state:
+                del st.session_state[reset_flag]
+
+# --- End Form Reset Utility ---
+
 def set_session_token(token):
     """Store session token in session state."""
     st.session_state.token = token
@@ -160,9 +207,13 @@ def set_session_persistent():
 def login_page():
     """Login page to handle user login and session creation."""
     st.title("🔐 Login to Scorix")
+    
+    # Check for form reset
+    clear_form_fields_on_reset("login_")
+    
     with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
         submitted = st.form_submit_button("Login")
         if submitted:
             if username and password:
@@ -191,11 +242,15 @@ def login_page():
 # --- Signup Page ---
 def signup_page():
     st.title("📝 Create Account")
+    
+    # Check for form reset
+    clear_form_fields_on_reset("signup_")
+    
     with st.form("signup_form"):
-        username = st.text_input("Username (min 3 characters)")
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        confirm_password = st.text_input("Confirm Password", type="password")
+        username = st.text_input("Username (min 3 characters)", key="signup_username")
+        email = st.text_input("Email", key="signup_email")
+        password = st.text_input("Password", type="password", key="signup_password")
+        confirm_password = st.text_input("Confirm Password", type="password", key="signup_confirm_password")
         submitted = st.form_submit_button("Create Account")
         if submitted:
             if not username or len(username) < 3:
@@ -276,8 +331,12 @@ def main_app():
     
     if page == "Create Question":
         st.header("📝 Create a New Question")
-        question = st.text_area("Enter the question text:")
-        sample_answer = st.text_area("Enter the sample answer:")
+        
+        # Check for form reset
+        clear_form_fields_on_reset("question_")
+        
+        question = st.text_area("Enter the question text:", key="question_text")
+        sample_answer = st.text_area("Enter the sample answer:", key="question_sample_answer")
 
         st.subheader("📋 Marking Rules")
         st.info("""
@@ -288,9 +347,9 @@ def main_app():
         """)
         
         rules = []
-        rule_count = st.number_input("How many marking rules?", min_value=1, step=1)
+        rule_count = st.number_input("How many marking rules?", min_value=1, step=1, key="question_rule_count")
         for i in range(rule_count):
-            rule = st.text_input(f"Rule {i + 1}")
+            rule = st.text_input(f"Rule {i + 1}", key=f"question_rule_{i}")
             if rule:
                 # Show rule type using dynamic detection
                 rule_type = detect_rule_type(rule)
@@ -309,6 +368,8 @@ def main_app():
                 # Clear cached grading results when new question is added
                 if 'grading_results' in st.session_state:
                     del st.session_state.grading_results
+                # Reset form fields
+                reset_form_on_success("question_")
             else:
                 st.error(f"❌ {message}")
 
@@ -326,9 +387,12 @@ def main_app():
             if not questions:
                 st.warning("⚠️ No questions found. Please create questions first before creating a test.")
             else:
+                # Check for form reset
+                clear_form_fields_on_reset("test_")
+                
                 with st.form("create_test_form"):
-                    test_name = st.text_input("Test Name", placeholder="e.g., Physics Midterm Exam")
-                    test_description = st.text_area("Test Description (Optional)", placeholder="Brief description of the test...")
+                    test_name = st.text_input("Test Name", placeholder="e.g., Physics Midterm Exam", key="test_name")
+                    test_description = st.text_area("Test Description (Optional)", placeholder="Brief description of the test...", key="test_description")
                     
                     st.subheader("📋 Select Questions for this Test")
                     st.info("💡 Select the questions you want to include in this test. Students will need to answer all selected questions.")
@@ -340,7 +404,7 @@ def main_app():
                         question_id = str(question["_id"])
                         
                         # Create a unique key for each checkbox
-                        checkbox_key = f"question_{question_id}"
+                        checkbox_key = f"test_question_{question_id}"
                         if st.checkbox(f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", key=checkbox_key):
                             selected_questions.append(question_id)
                     
@@ -357,7 +421,8 @@ def main_app():
                             success, message = save_test(test_name, test_description, selected_questions, st.session_state.user["_id"])
                             if success:
                                 st.success(f"✅ {message}")
-                                st.rerun()
+                                # Reset form fields
+                                reset_form_on_success("test_")
                             else:
                                 st.error(f"❌ {message}")
         
@@ -477,9 +542,13 @@ def main_app():
                     
                     # Manual entry form
                     st.subheader("📝 Manual Entry")
+                    
+                    # Check for form reset
+                    clear_form_fields_on_reset("manual_test_")
+                    
                     with st.form("manual_test_answer_form"):
-                        student_name = st.text_input("Student Name")
-                        student_roll_no = st.text_input("Student Roll No")
+                        student_name = st.text_input("Student Name", key="manual_test_student_name")
+                        student_roll_no = st.text_input("Student Roll No", key="manual_test_student_roll")
                         
                         st.subheader("📝 Answer Each Question")
                         question_answers = {}
@@ -492,7 +561,7 @@ def main_app():
                                 answer = st.text_area(
                                     f"Q{i}: {question_text[:100]}{'...' if len(question_text) > 100 else ''}",
                                     max_chars=4000,
-                                    key=f"test_answer_{qid}"
+                                    key=f"manual_test_answer_{qid}"
                                 )
                                 question_answers[qid] = answer
                         
@@ -508,7 +577,8 @@ def main_app():
                                 )
                                 if success:
                                     st.success(f"✅ {message}")
-                                    st.rerun()
+                                    # Reset form fields
+                                    reset_form_on_success("manual_test_")
                                 else:
                                     st.error(f"❌ {message}")
                     
@@ -654,6 +724,10 @@ def main_app():
 
     elif page == "Upload Answers":
         st.header("📤 Upload Student Answers")
+        
+        # Check for form reset
+        clear_form_fields_on_reset("answer_")
+        
         questions = get_questions(st.session_state.user["_id"])
         
         if not questions:
@@ -681,9 +755,9 @@ def main_app():
         """)
 
         with st.form(key="answer_form"):
-            name = st.text_input("Student Name")
-            roll_no = st.text_input("Student Roll No")
-            answer = st.text_area("Student Answer", max_chars=4000)
+            name = st.text_input("Student Name", key="answer_name")
+            roll_no = st.text_input("Student Roll No", key="answer_roll_no")
+            answer = st.text_area("Student Answer", max_chars=4000, key="answer_text")
             submitted = st.form_submit_button("Submit Answer")
 
         if submitted:
@@ -693,6 +767,8 @@ def main_app():
                 # Clear cached grading results when new answer is added
                 if 'grading_results' in st.session_state:
                     del st.session_state.grading_results
+                # Reset form fields
+                reset_form_on_success("answer_")
             else:
                 st.error(f"❌ {message}")
 
@@ -1240,7 +1316,11 @@ def main_app():
             
             # Clear Student Answers
             st.write("**🗑️ Clear All Student Answers**")
-            confirm_answers = st.checkbox("I understand this will delete ALL student answers", key="confirm_answers_bulk")
+            
+            # Check for form reset
+            clear_form_fields_on_reset("clear_answers_")
+            
+            confirm_answers = st.checkbox("I understand this will delete ALL student answers", key="clear_answers_confirm")
             with st.form("clear_answers_form_bulk"):
                 clear_answers_submitted = st.form_submit_button("🗑️ Clear All Student Answers", disabled=not confirm_answers)
                 if clear_answers_submitted:
@@ -1256,6 +1336,8 @@ def main_app():
                                     st.success(f"✅ Deleted {result.deleted_count} student answers")
                                     if 'grading_results' in st.session_state:
                                         del st.session_state.grading_results
+                                    # Reset form fields
+                                    reset_form_on_success("clear_answers_")
                             except Exception as e:
                                 st.error(f"❌ Error: {str(e)}")
                                 st.error("Please check your database connection and try again.")
@@ -1266,7 +1348,11 @@ def main_app():
             
             # Clear Grades
             st.write("**🗑️ Clear All Grades**")
-            confirm_grades = st.checkbox("I understand this will delete ALL grading results", key="confirm_grades_bulk")
+            
+            # Check for form reset
+            clear_form_fields_on_reset("clear_grades_")
+            
+            confirm_grades = st.checkbox("I understand this will delete ALL grading results", key="clear_grades_confirm")
             with st.form("clear_grades_form_bulk"):
                 clear_grades_submitted = st.form_submit_button("🗑️ Clear All Grades", disabled=not confirm_grades)
                 if clear_grades_submitted:
@@ -1282,6 +1368,8 @@ def main_app():
                                     st.success(f"✅ Deleted {result.deleted_count} grades")
                                     if 'grading_results' in st.session_state:
                                         del st.session_state.grading_results
+                                    # Reset form fields
+                                    reset_form_on_success("clear_grades_")
                             except Exception as e:
                                 st.error(f"❌ Error: {str(e)}")
                                 st.error("Please check your database connection and try again.")
@@ -1292,7 +1380,11 @@ def main_app():
             
             # Clear Test Grades
             st.write("**🗑️ Clear All Test Grades**")
-            confirm_test_grades = st.checkbox("I understand this will delete ALL test grading results", key="confirm_test_grades_bulk")
+            
+            # Check for form reset
+            clear_form_fields_on_reset("clear_test_grades_")
+            
+            confirm_test_grades = st.checkbox("I understand this will delete ALL test grading results", key="clear_test_grades_confirm")
             with st.form("clear_test_grades_form_bulk"):
                 clear_test_grades_submitted = st.form_submit_button("🗑️ Clear All Test Grades", disabled=not confirm_test_grades)
                 if clear_test_grades_submitted:
@@ -1304,6 +1396,8 @@ def main_app():
                                     st.success(f"✅ {message}")
                                     if 'grading_results' in st.session_state:
                                         del st.session_state.grading_results
+                                    # Reset form fields
+                                    reset_form_on_success("clear_test_grades_")
                                 else:
                                     st.error(f"❌ {message}")
                             except Exception as e:
@@ -1316,7 +1410,11 @@ def main_app():
             
             # Clear Test Answers
             st.write("**🗑️ Clear All Test Answers**")
-            confirm_test_answers = st.checkbox("I understand this will delete ALL test submissions", key="confirm_test_answers_bulk")
+            
+            # Check for form reset
+            clear_form_fields_on_reset("clear_test_answers_")
+            
+            confirm_test_answers = st.checkbox("I understand this will delete ALL test submissions", key="clear_test_answers_confirm")
             with st.form("clear_test_answers_form_bulk"):
                 clear_test_answers_submitted = st.form_submit_button("🗑️ Clear All Test Answers", disabled=not confirm_test_answers)
                 if clear_test_answers_submitted:
@@ -1332,6 +1430,8 @@ def main_app():
                                     st.success(f"✅ Deleted {result.deleted_count} test answers")
                                     if 'grading_results' in st.session_state:
                                         del st.session_state.grading_results
+                                    # Reset form fields
+                                    reset_form_on_success("clear_test_answers_")
                             except Exception as e:
                                 st.error(f"❌ Error: {str(e)}")
                                 st.error("Please check your database connection and try again.")
