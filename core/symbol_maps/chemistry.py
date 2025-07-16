@@ -1,0 +1,21 @@
+chemistry_phrase_to_symbol = {
+    "mole": "mol",
+    "moles": "mol",
+    "molarity": "M",
+    "concentration": "[ ]",
+    "volume": "V",
+    "pressure": "P",
+    "temperature": "T",
+    "gas constant": "R",
+    "enthalpy": "H",
+    "entropy": "S",
+    "gibbs free energy": "G",
+    "molar mass": "M",
+    "molar volume": "V",
+    "molar density": "ρ",
+    "molar concentration": "[ ]",
+    "molar solubility": "S",
+    "molar solubility product": "Ksp",
+    "molar solubility product constant": "Ksp",
+    # Add more as needed
+} 

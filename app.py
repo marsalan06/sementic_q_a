@@ -61,6 +61,41 @@ def clear_form_fields_on_reset(form_key):
 
 # --- End Form Reset Utility ---
 
+# --- UI Helper Functions ---
+def display_rule_types_info():
+    """Display rule types information with math examples"""
+    st.info("""
+    💡 **Rule Types (Auto-detected):**
+    - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
+    - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
+    - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
+    - 🧮 **math_equation**: For mathematical equations (e.g., "force equals mass times acceleration")
+    """)
+    
+    # Add math examples expander
+    with st.expander("🧮 Math Examples"):
+        st.markdown("""
+        **🧮 Math Equation Rules:**
+        Write rules in natural language - the system converts them to symbols automatically!
+        
+        **Physics Examples:**
+        - `force equals mass times acceleration` → matches "F = m * a"
+        - `kinetic energy equals one half mass times velocity squared` → matches "K = 1/2 * m * v^2"
+        
+        **Chemistry Examples:**
+        - `molarity equals moles divided by volume` → matches "M = mol / V"
+        
+        **Math Examples:**
+        - `area equals pi times radius squared` → matches "A = pi * r^2"
+        - `theta equals pi divided by two` → matches "θ = pi / 2"
+        
+        **💡 How to write math_equation rules:**
+        1. Use natural language (e.g., "force equals mass times acceleration")
+        2. The system auto-detects it as math_equation
+        3. It will match both natural language and symbolic answers
+        4. No need to write symbols - the system handles conversion!
+        """)
+
 def set_session_token(token):
     """Store session token in session state."""
     st.session_state.token = token
@@ -339,24 +374,24 @@ def main_app():
         sample_answer = st.text_area("Enter the sample answer:", key="question_sample_answer")
 
         st.subheader("📋 Marking Rules")
-        st.info("""
-        💡 **Rule Types (Auto-detected):**
-        - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
-        - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
-        - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
-        """)
+        display_rule_types_info()
         
         rules = []
         rule_count = st.number_input("How many marking rules?", min_value=1, step=1, key="question_rule_count")
         for i in range(rule_count):
-            rule = st.text_input(f"Rule {i + 1}", key=f"question_rule_{i}")
+            rule = st.text_input(
+                f"Rule {i + 1}", 
+                key=f"question_rule_{i}",
+                placeholder="e.g., 'force equals mass times acceleration' or 'mentions Newton's second law'"
+            )
             if rule:
                 # Show rule type using dynamic detection
                 rule_type = detect_rule_type(rule)
                 icons = {
                     "exact_phrase": "🔍",
                     "contains_keywords": "🔑", 
-                    "semantic": "🧠"
+                    "semantic": "🧠",
+                    "math_equation": "🧮"
                 }
                 st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
             rules.append(rule)
@@ -476,12 +511,7 @@ def main_app():
                         )
                         
                         st.subheader("📋 Marking Rules")
-                        st.info("""
-                        💡 **Rule Types (Auto-detected):**
-                        - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
-                        - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
-                        - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
-                        """)
+                        display_rule_types_info()
                         
                         # Display existing rules
                         existing_rules = question.get("marking_scheme", [])
@@ -498,7 +528,8 @@ def main_app():
                             rule = st.text_input(
                                 f"Rule {i + 1}", 
                                 value=default_rule,
-                                key=f"edit_question_rule_{i}"
+                                key=f"edit_question_rule_{i}",
+                                placeholder="e.g., 'force equals mass times acceleration' or 'mentions Newton's second law'"
                             )
                             if rule:
                                 # Show rule type using dynamic detection
@@ -506,7 +537,8 @@ def main_app():
                                 icons = {
                                     "exact_phrase": "🔍",
                                     "contains_keywords": "🔑", 
-                                    "semantic": "🧠"
+                                    "semantic": "🧠",
+                                    "math_equation": "🧮"
                                 }
                                 st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
                             rules.append(rule)

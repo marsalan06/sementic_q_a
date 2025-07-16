@@ -2,6 +2,7 @@ from sentence_transformers import SentenceTransformer, util
 import re
 import nltk
 from nltk.stem import WordNetLemmatizer
+from core.math_utils import is_math_expression, compare_math_expressions
 
 # Download NLTK data if not available
 try:
@@ -19,7 +20,8 @@ except Exception as e:
             return word.lower()
     lemmatizer = FallbackLemmatizer()
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# Replace with SciBERT model optimized for math/scientific context
+model = SentenceTransformer('allenai/scibert_scivocab_uncased')
 
 def assign_grade(score, grade_thresholds=None):
     """
@@ -220,6 +222,14 @@ def match_rule(student_answer, rule_text, rule_type="semantic", threshold=0.2, d
         
         return words_present, score
     
+    elif rule_type == "math_equation":
+        try:
+            return compare_math_expressions(rule_text, student_answer)
+        except Exception as e:
+            # If math parsing fails, fall back to semantic matching
+            print(f"Math parsing failed for '{rule_text}', falling back to semantic matching: {e}")
+            return calculate_semantic_similarity(student_answer, rule_text, threshold)
+    
     elif rule_type == "semantic":
         return calculate_semantic_similarity(student_answer, rule_text, threshold)
     
@@ -248,7 +258,10 @@ def debug_grading(student_answer, sample, rules):
         # Auto-detect rule type if not specified
         if rule_type == "semantic":
             rule_lower = rule_text.lower()
-            if any(word in rule_lower for word in ["formula", "equation", "mentions"]):
+            # Be more conservative about math detection - only if it's clearly a mathematical expression
+            if is_math_expression(rule_text) and not any(word in rule_lower for word in ["formula for", "equation for", "could not parse"]):
+                rule_type = "math_equation"
+            elif any(word in rule_lower for word in ["formula", "equation", "mentions"]):
                 rule_type = "exact_phrase"
             elif any(word in rule_lower for word in ["contains", "has", "includes"]):
                 rule_type = "contains_keywords"
@@ -294,7 +307,10 @@ def calculate_similarity_with_feedback(student_answer, sample, rules, threshold=
         # Auto-detect rule type if not specified
         if rule_type == "semantic":
             rule_lower = rule_text.lower()
-            if any(word in rule_lower for word in ["formula", "equation", "mentions"]):
+            # Be more conservative about math detection - only if it's clearly a mathematical expression
+            if is_math_expression(rule_text) and not any(word in rule_lower for word in ["formula for", "equation for", "could not parse"]):
+                rule_type = "math_equation"
+            elif any(word in rule_lower for word in ["formula", "equation", "mentions"]):
                 rule_type = "exact_phrase"
             elif any(word in rule_lower for word in ["contains", "has", "includes"]):
                 rule_type = "contains_keywords"

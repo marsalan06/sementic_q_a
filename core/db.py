@@ -62,14 +62,18 @@ def detect_rule_type(rule_text):
     rule_lower = rule_text.lower()
     
     # Check for exact phrase indicators
-    if any(word in rule_lower for word in ["formula", "equation", "mentions"]):
+    if "mentions" in rule_lower:
         return "exact_phrase"
     
+    # Check for math equation indicators
+    elif any(word in rule_lower for word in ["equation", "formula"]):
+        return "math_equation"
+    
     # Check for keyword matching indicators
-    elif any(word in rule_lower for word in ["contains", "has", "includes"]):
+    elif "contains" in rule_lower:
         return "contains_keywords"
     
-    # Default to semantic for conceptual understanding
+    # Default to semantic for everything else
     else:
         return "semantic"
 
