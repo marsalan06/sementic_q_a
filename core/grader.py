@@ -21,7 +21,8 @@ except Exception as e:
     lemmatizer = FallbackLemmatizer()
 
 # Replace with SciBERT model optimized for math/scientific context
-model = SentenceTransformer('allenai/scibert_scivocab_uncased')
+model = SentenceTransformer('all-MiniLM-L6-v2')
+# model = SentenceTransformer('allenai/scibert_scivocab_uncased')
 
 def assign_grade(score, grade_thresholds=None):
     """
