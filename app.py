@@ -440,7 +440,7 @@ def main_app():
                     col1, col2 = st.columns([2, 1])
                     
                     with col1:
-                        st.markdown(f"**Question:** {question['question']}")
+                        st.markdown(f"**Question:** {question.get('question', 'No question text')}")
                         if question.get("sample_answer"):
                             st.markdown(f"**Sample Answer:** {question.get('sample_answer')}")
                         
@@ -490,7 +490,7 @@ def main_app():
                     # Handle delete confirmation
                     if st.session_state.get('delete_question_id') == selected_question_id:
                         st.warning(f"⚠️ Are you sure you want to delete this question?")
-                        st.write(f"**Question:** {question['question'][:200]}{'...' if len(question['question']) > 200 else ''}")
+                        st.write(f"**Question:** {question.get('question', 'No question text')[:200]}{'...' if len(question.get('question', '')) > 200 else ''}")
                         
                         # Get counts for this specific question
                         question_answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == selected_question_id])
@@ -547,7 +547,7 @@ def main_app():
                         with st.form("edit_question_form"):
                             question_text = st.text_area(
                                 "Question Text:", 
-                                value=question["question"], 
+                                value=question.get("question", ""), 
                                 key="edit_question_text"
                             )
                             sample_answer = st.text_area(
@@ -636,8 +636,8 @@ def main_app():
                     # Display questions with expandable details and checkboxes
                     selected_questions = []
                     for i, question in enumerate(questions):
-                        question_text = question["question"]
-                        question_id = str(question["_id"])
+                        question_text = question.get("question", "")
+                        question_id = str(question.get("_id", ""))
                         sample_answer = question.get("sample_answer", "")
                         marking_scheme = question.get("marking_scheme", [])
                         
@@ -848,7 +848,7 @@ def main_app():
                         for i, qid in enumerate(question_ids, 1):
                             question = next((q for q in questions if str(q["_id"]) == qid), None)
                             if question:
-                                question_text = question["question"]
+                                question_text = question.get("question", "")
                                 answer = st.text_area(
                                     f"Q{i}: {question_text[:100]}{'...' if len(question_text) > 100 else ''}",
                                     max_chars=4000,
@@ -1112,16 +1112,23 @@ def main_app():
                         summary_data = []
                         for row in results_data:
                             summary_row = {
-                                "Student Name": row["Student Name"],
-                                "Roll No": row["Roll No"],
-                                "Overall Score": row["Overall Score"],
-                                "Overall Grade": row["Overall Grade"],
-                                "Questions Answered": row["Questions Answered"]
+                                "Student Name": row.get("Student Name", "Unknown"),
+                                "Roll No": row.get("Roll No", "Unknown"),
+                                "Overall Score": row.get("Overall Score", "0%"),
+                                "Overall Grade": row.get("Overall Grade", "F"),
+                                "Questions Answered": row.get("Questions Answered", "0/0")
                             }
                             # Add question scores only
                             for i in range(1, len(test_questions) + 1):
-                                summary_row[f"Q{i} Score"] = row[f"Q{i} Score"]
-                                summary_row[f"Q{i} Grade"] = row[f"Q{i} Grade"]
+                                score_key = f"Q{i} Score"
+                                grade_key = f"Q{i} Grade"
+                                if score_key in row and grade_key in row:
+                                    summary_row[score_key] = row[score_key]
+                                    summary_row[grade_key] = row[grade_key]
+                                else:
+                                    # Handle missing data gracefully
+                                    summary_row[score_key] = "N/A"
+                                    summary_row[grade_key] = "N/A"
                             summary_data.append(summary_row)
                         
                         # Sort the data
@@ -1146,7 +1153,7 @@ def main_app():
                             # Grade distribution
                             grade_counts = {}
                             for row in summary_data:
-                                grade = row["Overall Grade"]
+                                grade = row.get("Overall Grade", "F")
                                 grade_counts[grade] = grade_counts.get(grade, 0) + 1
                             
                             st.write("**Grade Distribution:**")
@@ -1157,21 +1164,39 @@ def main_app():
                         
                         with col2:
                             # Score ranges
-                            scores = [float(row["Overall Score"].replace('%', '')) for row in summary_data]
+                            scores = []
+                            for row in summary_data:
+                                try:
+                                    score_str = row.get("Overall Score", "0%")
+                                    if score_str != "N/A":
+                                        scores.append(float(score_str.replace('%', '')))
+                                except (ValueError, AttributeError):
+                                    continue
                             if scores:
                                 st.write("**Score Ranges:**")
                                 st.write(f"Highest: {max(scores):.1f}%")
                                 st.write(f"Lowest: {min(scores):.1f}%")
                                 st.write(f"Average: {sum(scores)/len(scores):.1f}%")
+                            else:
+                                st.write("**Score Ranges:** No valid scores available")
                         
                         with col3:
                             # Question performance
                             st.write("**Question Performance:**")
                             for i in range(1, len(test_questions) + 1):
-                                q_scores = [float(row[f"Q{i} Score"].replace('%', '')) for row in summary_data]
+                                score_key = f"Q{i} Score"
+                                q_scores = []
+                                for row in summary_data:
+                                    if score_key in row and row[score_key] != "N/A":
+                                        try:
+                                            q_scores.append(float(row[score_key].replace('%', '')))
+                                        except (ValueError, AttributeError):
+                                            continue
                                 if q_scores:
                                     avg_q_score = sum(q_scores) / len(q_scores)
                                     st.write(f"Q{i} Avg: {avg_q_score:.1f}%")
+                                else:
+                                    st.write(f"Q{i} Avg: N/A")
                     
                     with tab2:
                         st.write("**Detailed view with student answers:**")
@@ -1188,8 +1213,8 @@ def main_app():
                         if search_term:
                             filtered_data = [
                                 row for row in results_data 
-                                if search_term.lower() in row["Student Name"].lower() 
-                                or search_term.lower() in row["Roll No"].lower()
+                                if (row.get("Student Name", "").lower() if row.get("Student Name") else "").find(search_term.lower()) != -1
+                                or (row.get("Roll No", "").lower() if row.get("Roll No") else "").find(search_term.lower()) != -1
                             ]
                         
                         if filtered_data:
@@ -1247,7 +1272,7 @@ def main_app():
                                     matched_rules = q_detail.get("matched_rules", [])
                                     missed_rules = q_detail.get("missed_rules", [])
                                     
-                                    with st.expander(f"Q{i}: {question['question'][:100]}{'...' if len(question['question']) > 100 else ''} - {score:.1f}% (Grade {q_grade})", expanded=False):
+                                    with st.expander(f"Q{i}: {question.get('question', 'No question text')[:100]}{'...' if len(question.get('question', '')) > 100 else ''} - {score:.1f}% (Grade {q_grade})", expanded=False):
                                         col1, col2 = st.columns(2)
                                         
                                         with col1:
@@ -1359,13 +1384,13 @@ def main_app():
                 for i, qid in enumerate(question_ids, 1):
                     question = next((q for q in questions if str(q["_id"]) == qid), None)
                     if question:
-                        with st.expander(f"Q{i}: {question['question'][:100]}{'...' if len(question['question']) > 100 else ''}", expanded=False):
-                            st.write(f"**Question:** {question['question']}")
+                        with st.expander(f"Q{i}: {question.get('question', 'No question text')[:100]}{'...' if len(question.get('question', '')) > 100 else ''}", expanded=False):
+                            st.write(f"**Question:** {question.get('question', 'No question text')}")
                             if question.get("sample_answer"):
-                                st.write(f"**Sample Answer:** {question['sample_answer']}")
+                                st.write(f"**Sample Answer:** {question.get('sample_answer', '')}")
                             if question.get("marking_scheme"):
                                 st.write("**Marking Rules:**")
-                                for j, rule in enumerate(question["marking_scheme"], 1):
+                                for j, rule in enumerate(question.get("marking_scheme", []), 1):
                                     rule_text = rule.get("text", "")
                                     if rule_text:
                                         rule_type = detect_rule_type(rule_text)
@@ -1418,8 +1443,8 @@ def main_app():
                         current_question_ids = set(test.get("question_ids", []))
                         
                         for i, question in enumerate(questions):
-                            question_text = question["question"]
-                            question_id = str(question["_id"])
+                            question_text = question.get("question", "")
+                            question_id = str(question.get("_id", ""))
                             sample_answer = question.get("sample_answer", "")
                             marking_scheme = question.get("marking_scheme", [])
                             
@@ -1496,10 +1521,10 @@ def main_app():
             st.warning("No questions found. Please create a question first.")
             return
             
-        question_titles = [q["question"] for q in questions]
+        question_titles = [q.get("question", "No question text") for q in questions]
         selected_index = st.selectbox("Select a question:", range(len(question_titles)), format_func=lambda i: question_titles[i])
 
-        selected_question_id = str(questions[selected_index]["_id"])
+        selected_question_id = str(questions[selected_index].get("_id", ""))
 
         # Standards/info box for answer submission
         st.info("""

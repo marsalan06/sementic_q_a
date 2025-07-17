@@ -196,8 +196,8 @@ class ImportExportService:
                     
                     # Create question
                     question_data = {
-                        'question': row['question_text'],
-                        'sample_answer': row['sample_answer'],
+                        'question': row.get('question_text', ''),
+                        'sample_answer': row.get('sample_answer', ''),
                         'rules': rules,
                         'user_id': self.user_id,
                         'created_at': datetime.utcnow()
@@ -243,8 +243,8 @@ class ImportExportService:
                     
                     # Create question
                     question = {
-                        'question': question_data['question_text'],
-                        'sample_answer': question_data['sample_answer'],
+                        'question': question_data.get('question_text', ''),
+                        'sample_answer': question_data.get('sample_answer', ''),
                         'rules': rules,
                         'user_id': self.user_id,
                         'created_at': datetime.utcnow()
@@ -295,9 +295,9 @@ class ImportExportService:
                     # Create answer
                     answer_data = {
                         'question_id': ObjectId(target_question_id),
-                        'student_name': row['student_name'],
-                        'student_roll_no': row['student_roll_no'],
-                        'student_ans': row['answer_text'],
+                        'student_name': row.get('student_name', ''),
+                        'student_roll_no': row.get('student_roll_no', ''),
+                        'student_ans': row.get('answer_text', ''),
                         'user_id': self.user_id,
                         'created_at': datetime.utcnow()
                     }
@@ -350,9 +350,9 @@ class ImportExportService:
                     # Create answer
                     answer = {
                         'question_id': ObjectId(target_question_id),
-                        'student_name': answer_data['student_name'],
-                        'student_roll_no': answer_data['student_roll_no'],
-                        'student_ans': answer_data['answer_text'],
+                        'student_name': answer_data.get('student_name', ''),
+                        'student_roll_no': answer_data.get('student_roll_no', ''),
+                        'student_ans': answer_data.get('answer_text', ''),
                         'user_id': self.user_id,
                         'created_at': datetime.utcnow()
                     }
