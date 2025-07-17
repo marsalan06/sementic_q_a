@@ -633,16 +633,43 @@ def main_app():
                     st.subheader("📋 Select Questions for this Test")
                     st.info("💡 Select the questions you want to include in this test. Students will need to answer all selected questions.")
                     
-                    # Display questions with checkboxes
+                    # Display questions with expandable details and checkboxes
                     selected_questions = []
                     for i, question in enumerate(questions):
                         question_text = question["question"]
                         question_id = str(question["_id"])
+                        sample_answer = question.get("sample_answer", "")
+                        marking_scheme = question.get("marking_scheme", [])
                         
                         # Create a unique key for each checkbox
                         checkbox_key = f"test_question_{question_id}"
-                        if st.checkbox(f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", key=checkbox_key):
-                            selected_questions.append(question_id)
+                        
+                        # Create expandable section for each question
+                        with st.expander(f"**Q{i+1}:** {question_text[:80]}{'...' if len(question_text) > 80 else ''}", expanded=False):
+                            # Question details
+                            st.markdown(f"**Question:** {question_text}")
+                            
+                            if sample_answer:
+                                st.markdown(f"**Sample Answer:** {sample_answer}")
+                            
+                            # Display marking rules
+                            if marking_scheme:
+                                st.write("**Marking Rules:**")
+                                for j, rule in enumerate(marking_scheme):
+                                    rule_text = rule.get("text", "")
+                                    if rule_text:
+                                        rule_type = detect_rule_type(rule_text)
+                                        icons = {
+                                            "exact_phrase": "🔍",
+                                            "contains_keywords": "🔑",
+                                            "semantic": "🧠",
+                                            "math_equation": "🧮"
+                                        }
+                                        st.write(f"• **Rule {j + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
+                            
+                            # Checkbox for selection
+                            if st.checkbox(f"Select this question", key=checkbox_key):
+                                selected_questions.append(question_id)
                     
                     st.write(f"**Selected Questions:** {len(selected_questions)}")
                     
@@ -669,35 +696,44 @@ def main_app():
             if not tests:
                 st.info("ℹ️ No tests created yet. Create your first test in the 'Create Test' tab.")
             else:
-                # Display tests in a clean card format
-                for test in tests:
-                    test_id = str(test["_id"])
-                    test_name = test["test_name"]
-                    test_description = test.get("test_description", "")
-                    question_count = len(test.get("question_ids", []))
-                    created_at = test.get("created_at", "")
+                # Create a dropdown to select tests
+                test_options = {f"{t['test_name']} ({len(t.get('question_ids', []))} questions)": str(t["_id"]) for t in tests}
+                test_options["Select a test to manage..."] = ""
+                
+                selected_test_text = st.selectbox(
+                    "Select a test to manage:",
+                    options=list(test_options.keys()),
+                    index=0,
+                    help="Choose a test from the dropdown to view details, edit, or delete it"
+                )
+                
+                selected_test_id = test_options[selected_test_text]
+                
+                if selected_test_id and selected_test_text != "Select a test to manage...":
+                    # Get the selected test
+                    test = get_test_by_id(selected_test_id, st.session_state.user["_id"])
                     
-                    # Get test statistics
-                    test_answers = get_test_answers(st.session_state.user["_id"], test_id)
-                    test_grades = get_test_grades(st.session_state.user["_id"], test_id)
-                    
-                    # Create a clean card layout
-                    with st.container():
-                        st.markdown("---")
-                        col1, col2, col3 = st.columns([3, 1, 1])
+                    if test:
+                        # Display test details in a clean format
+                        st.subheader("📋 Test Details")
+                        
+                        col1, col2 = st.columns([2, 1])
                         
                         with col1:
-                            st.markdown(f"### 📋 {test_name}")
-                            if test_description:
-                                st.caption(f"*{test_description}*")
-                            st.write(f"**Created:** {created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'}")
+                            st.markdown(f"**Test Name:** {test['test_name']}")
+                            if test.get("test_description"):
+                                st.markdown(f"**Description:** {test.get('test_description')}")
+                            
+                            # Get test statistics
+                            test_answers = get_test_answers(st.session_state.user["_id"], selected_test_id)
+                            test_grades = get_test_grades(st.session_state.user["_id"], selected_test_id)
+                            
+                            st.write(f"**Created:** {test.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if test.get('created_at') else 'Unknown'}")
+                            st.write(f"**Questions:** {len(test.get('question_ids', []))}")
                         
                         with col2:
                             st.metric("📝 Submissions", len(test_answers))
                             st.metric("📊 Graded", len(test_grades))
-                        
-                        with col3:
-                            st.metric("📋 Questions", question_count)
                             if len(test_answers) > 0 and len(test_grades) > 0:
                                 # Handle percentage values that might be strings
                                 total_score = 0
@@ -712,60 +748,66 @@ def main_app():
                                 avg_score = total_score / len(test_grades)
                                 st.metric("📈 Avg Score", f"{avg_score:.1f}%")
                         
-                        # Action buttons in a clean row
+                        # Action buttons
                         col1, col2, col3, col4, col5 = st.columns(5)
                         
                         with col1:
-                            if st.button("📋 Details", key=f"details_{test_id}"):
-                                st.session_state.selected_test_id = test_id
+                            if st.button("📋 View Details", key=f"details_{selected_test_id}"):
+                                st.session_state.selected_test_id = selected_test_id
                                 st.session_state.show_test_details = True
                                 st.rerun()
                         
                         with col2:
-                            if st.button("✏️ Edit", key=f"edit_test_{test_id}"):
-                                st.session_state.edit_test_id = test_id
+                            if st.button("✏️ Edit Test", key=f"edit_test_{selected_test_id}"):
+                                st.session_state.edit_test_id = selected_test_id
                                 st.session_state.show_test_edit = True
                                 st.rerun()
                         
                         with col3:
                             if len(test_answers) > 0:
-                                if st.button("📊 Results", key=f"results_{test_id}"):
-                                    st.session_state.selected_test_id = test_id
+                                if st.button("📊 View Results", key=f"results_{selected_test_id}"):
+                                    st.session_state.selected_test_id = selected_test_id
                                     st.session_state.show_test_results = True
                                     st.rerun()
                         
                         with col4:
                             if len(test_answers) > 0 and len(test_grades) == 0:
-                                if st.button("🎯 Grade", key=f"grade_{test_id}"):
-                                    st.session_state.selected_test_id = test_id
+                                if st.button("🎯 Grade Test", key=f"grade_{selected_test_id}"):
+                                    st.session_state.selected_test_id = selected_test_id
                                     st.session_state.grade_test = True
                                     st.rerun()
                         
                         with col5:
-                            if st.button("🗑️ Delete", key=f"delete_{test_id}"):
-                                st.session_state.delete_test_id = test_id
+                            if st.button("🗑️ Delete Test", key=f"delete_{selected_test_id}"):
+                                st.session_state.delete_test_id = selected_test_id
                                 st.rerun()
-                
-                # Handle delete confirmation
-                if st.session_state.get('delete_test_id'):
-                    test_id = st.session_state.delete_test_id
-                    test = get_test_by_id(test_id, st.session_state.user["_id"])
-                    if test:
-                        st.warning(f"⚠️ Are you sure you want to delete '{test['test_name']}'?")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("✅ Yes, Delete"):
-                                success, message = delete_test(test_id, st.session_state.user["_id"])
-                                if success:
-                                    st.success(f"✅ {message}")
+                        
+                        # Handle delete confirmation
+                        if st.session_state.get('delete_test_id') == selected_test_id:
+                            st.warning(f"⚠️ Are you sure you want to delete this test?")
+                            st.write(f"**Test:** {test['test_name']}")
+                            
+                            # Get counts for this specific test
+                            test_answers_count = len(test_answers)
+                            test_grades_count = len(test_grades)
+                            st.write(f"**This will also delete:** {test_answers_count} answers and {test_grades_count} grades")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("✅ Yes, Delete"):
+                                    success, message = delete_test(selected_test_id, st.session_state.user["_id"])
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                        del st.session_state.delete_test_id
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {message}")
+                            with col2:
+                                if st.button("❌ Cancel"):
                                     del st.session_state.delete_test_id
                                     st.rerun()
-                                else:
-                                    st.error(f"❌ {message}")
-                        with col2:
-                            if st.button("❌ Cancel"):
-                                del st.session_state.delete_test_id
-                                st.rerun()
+                else:
+                    st.info("💡 Select a test from the dropdown above to view details, edit, or delete it.")
         
         with tab3:
             st.subheader("📤 Upload Test Answers")
@@ -1205,7 +1247,7 @@ def main_app():
                                     matched_rules = q_detail.get("matched_rules", [])
                                     missed_rules = q_detail.get("missed_rules", [])
                                     
-                                    with st.expander(f"Q{i}: {question['question'][:80]}{'...' if len(question['question']) > 80 else ''} - {score:.1f}% (Grade {q_grade})", expanded=False):
+                                    with st.expander(f"Q{i}: {question['question'][:100]}{'...' if len(question['question']) > 100 else ''} - {score:.1f}% (Grade {q_grade})", expanded=False):
                                         col1, col2 = st.columns(2)
                                         
                                         with col1:
@@ -1325,13 +1367,15 @@ def main_app():
                                 st.write("**Marking Rules:**")
                                 for j, rule in enumerate(question["marking_scheme"], 1):
                                     rule_text = rule.get("text", "")
-                                    rule_type = rule.get("type", "semantic")
-                                    icons = {
-                                        "exact_phrase": "🔍",
-                                        "contains_keywords": "🔑", 
-                                        "semantic": "🧠"
-                                    }
-                                    st.write(f"{j}. {rule_text} {icons.get(rule_type, '🧠')}")
+                                    if rule_text:
+                                        rule_type = detect_rule_type(rule_text)
+                                        icons = {
+                                            "exact_phrase": "🔍",
+                                            "contains_keywords": "🔑",
+                                            "semantic": "🧠",
+                                            "math_equation": "🧮"
+                                        }
+                                        st.write(f"• **Rule {j}:** {rule_text} {icons.get(rule_type, '🧠')}")
                 
                 if st.button("🔙 Back to Test Management", key="back_from_details"):
                     st.session_state.show_test_details = False
@@ -1369,25 +1413,48 @@ def main_app():
                     if not questions:
                         st.error("❌ No questions found. Please create questions first.")
                     else:
-                        # Display questions with checkboxes
+                        # Display questions with expandable details and checkboxes
                         selected_questions = []
                         current_question_ids = set(test.get("question_ids", []))
                         
                         for i, question in enumerate(questions):
                             question_text = question["question"]
                             question_id = str(question["_id"])
+                            sample_answer = question.get("sample_answer", "")
+                            marking_scheme = question.get("marking_scheme", [])
                             
                             # Check if this question is currently selected
                             is_selected = question_id in current_question_ids
                             
                             # Create a unique key for each checkbox
                             checkbox_key = f"edit_test_question_{question_id}"
-                            if st.checkbox(
-                                f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", 
-                                value=is_selected,
-                                key=checkbox_key
-                            ):
-                                selected_questions.append(question_id)
+                            
+                            # Create expandable section for each question
+                            with st.expander(f"**Q{i+1}:** {question_text[:80]}{'...' if len(question_text) > 80 else ''}", expanded=False):
+                                # Question details
+                                st.markdown(f"**Question:** {question_text}")
+                                
+                                if sample_answer:
+                                    st.markdown(f"**Sample Answer:** {sample_answer}")
+                                
+                                # Display marking rules
+                                if marking_scheme:
+                                    st.write("**Marking Rules:**")
+                                    for j, rule in enumerate(marking_scheme):
+                                        rule_text = rule.get("text", "")
+                                        if rule_text:
+                                            rule_type = detect_rule_type(rule_text)
+                                            icons = {
+                                                "exact_phrase": "🔍",
+                                                "contains_keywords": "🔑",
+                                                "semantic": "🧠",
+                                                "math_equation": "🧮"
+                                            }
+                                            st.write(f"• **Rule {j + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
+                                
+                                # Checkbox for selection
+                                if st.checkbox(f"Select this question", value=is_selected, key=checkbox_key):
+                                    selected_questions.append(question_id)
                         
                         st.write(f"**Selected Questions:** {len(selected_questions)}")
                         
