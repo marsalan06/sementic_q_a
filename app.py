@@ -63,38 +63,13 @@ def clear_form_fields_on_reset(form_key):
 
 # --- UI Helper Functions ---
 def display_rule_types_info():
-    """Display rule types information with math examples"""
+    """Display rule types information"""
     st.info("""
     💡 **Rule Types (Auto-detected):**
     - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
     - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
     - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
-    - 🧮 **math_equation**: For mathematical equations (e.g., "force equals mass times acceleration")
     """)
-    
-    # Add math examples expander
-    with st.expander("🧮 Math Examples"):
-        st.markdown("""
-        **🧮 Math Equation Rules:**
-        Write rules in natural language - the system converts them to symbols automatically!
-        
-        **Physics Examples:**
-        - `force equals mass times acceleration` → matches "F = m * a"
-        - `kinetic energy equals one half mass times velocity squared` → matches "K = 1/2 * m * v^2"
-        
-        **Chemistry Examples:**
-        - `molarity equals moles divided by volume` → matches "M = mol / V"
-        
-        **Math Examples:**
-        - `area equals pi times radius squared` → matches "A = pi * r^2"
-        - `theta equals pi divided by two` → matches "θ = pi / 2"
-        
-        **💡 How to write math_equation rules:**
-        1. Use natural language (e.g., "force equals mass times acceleration")
-        2. The system auto-detects it as math_equation
-        3. It will match both natural language and symbolic answers
-        4. No need to write symbols - the system handles conversion!
-        """)
 
 def set_session_token(token):
     """Store session token in session state."""
@@ -391,7 +366,6 @@ def main_app():
                     "exact_phrase": "🔍",
                     "contains_keywords": "🔑", 
                     "semantic": "🧠",
-                    "math_equation": "🧮"
                 }
                 st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
             rules.append(rule)
@@ -465,7 +439,6 @@ def main_app():
                                             "exact_phrase": "🔍",
                                             "contains_keywords": "🔑", 
                                             "semantic": "🧠",
-                                            "math_equation": "🧮"
                                         }
                                         st.write(f"• **Rule {i + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
                                 st.divider()
@@ -531,7 +504,6 @@ def main_app():
                                         "exact_phrase": "🔍",
                                         "contains_keywords": "🔑",
                                         "semantic": "🧠",
-                                        "math_equation": "🧮"
                                     }
                                     st.write(f"• **Rule {i + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
                             st.divider()
@@ -575,7 +547,6 @@ def main_app():
                                         "exact_phrase": "🔍",
                                         "contains_keywords": "🔑",
                                         "semantic": "🧠",
-                                        "math_equation": "🧮"
                                     }
                                     st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
                                 rules.append(rule)
@@ -663,7 +634,6 @@ def main_app():
                                             "exact_phrase": "🔍",
                                             "contains_keywords": "🔑",
                                             "semantic": "🧠",
-                                            "math_equation": "🧮"
                                         }
                                         st.write(f"• **Rule {j + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
                             
@@ -1309,7 +1279,7 @@ def main_app():
                 st.divider()
                 st.subheader("📤 Export Options")
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     if st.button("📊 Export Results (CSV)"):
                         import_export_service = ImportExportService(st.session_state.user["_id"])
@@ -1318,7 +1288,7 @@ def main_app():
                             st.download_button(
                                 label="📥 Download Results CSV",
                                 data=csv_data,
-                                file_name=f"{test['test_name'].replace(' ', '_')}_results.csv",
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_results.csv",
                                 mime="text/csv"
                             )
                         else:
@@ -1332,17 +1302,39 @@ def main_app():
                             st.download_button(
                                 label="📥 Download Answers CSV",
                                 data=csv_data,
-                                file_name=f"{test['test_name'].replace(' ', '_')}_answers.csv",
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_answers.csv",
                                 mime="text/csv"
                             )
                         else:
                             st.error("Failed to export answers")
                 
                 with col3:
-                    if st.button("🔙 Back to Test Management", key="back_from_results"):
-                        st.session_state.show_test_results = False
-                        st.session_state.selected_test_id = None
-                        st.rerun()
+                    if st.button("📋 Export Test with Questions (CSV)"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.export_test_with_questions_to_csv(test_id)
+                        if success:
+                            st.download_button(
+                                label="📥 Download Test with Questions CSV",
+                                data=csv_data,
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_with_questions.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to export test with questions")
+                
+                with col4:
+                    if st.button("📋 Generate Answer Template (CSV)"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.generate_test_answer_template_csv(test_id)
+                        if success:
+                            st.download_button(
+                                label="📥 Download Answer Template CSV",
+                                data=csv_data,
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_answer_template.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to generate answer template")
                 
                 # Quick actions
                 st.divider()
@@ -1364,6 +1356,13 @@ def main_app():
                         # This will take them to the upload tab in test management
                         st.session_state.show_test_results = False
                         st.rerun()
+                
+                # Back button
+                st.divider()
+                if st.button("🔙 Back to Test Management", key="back_from_results"):
+                    st.session_state.show_test_results = False
+                    st.session_state.selected_test_id = None
+                    st.rerun()
         
         # Handle test details view
         if st.session_state.get('show_test_details', False) and st.session_state.get('selected_test_id'):
@@ -1398,7 +1397,6 @@ def main_app():
                                             "exact_phrase": "🔍",
                                             "contains_keywords": "🔑",
                                             "semantic": "🧠",
-                                            "math_equation": "🧮"
                                         }
                                         st.write(f"• **Rule {j}:** {rule_text} {icons.get(rule_type, '🧠')}")
                 
@@ -1473,7 +1471,6 @@ def main_app():
                                                 "exact_phrase": "🔍",
                                                 "contains_keywords": "🔑",
                                                 "semantic": "🧠",
-                                                "math_equation": "🧮"
                                             }
                                             st.write(f"• **Rule {j + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
                                 
@@ -2026,48 +2023,209 @@ def main_app():
                 st.warning("⚠️ No questions found. Please create a question first.")
 
         with tab3:
-            st.subheader("📋 Templates (CSV)")
-            templates = import_export_service.get_export_templates()
+            st.subheader("📤 Data Management")
             
-            # Student Answers Template
-            st.write("**📝 Student Answers Template:**")
-            answers_template = templates['student_answers']
-            output = io.StringIO()
-            writer = csv.writer(output)
-            writer.writerow(answers_template['headers'])
-            writer.writerow(answers_template['example'])
-            st.download_button(
-                label="📥 Download Answers Template",
-                data=output.getvalue(),
-                file_name="student_answers_template.csv",
-                mime="text/csv"
-            )
-            st.code(output.getvalue())
+            # Simple, clean layout with clear sections
+            st.info("💡 **Quick Guide:** Export your data for backup or import new data from CSV files.")
+            
+            # Export Section
+            st.write("### 📤 Export Data")
+            
+            # Questions Export
+            with st.expander("📝 Export Questions", expanded=True):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📊 Export All Questions", type="primary"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.export_questions_to_csv()
+                        if success:
+                            st.download_button(
+                                label="📥 Download Questions CSV",
+                                data=csv_data,
+                                file_name="questions_export.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error(f"❌ {csv_data}")
+                
+                with col2:
+                    st.write("**What's included:** Question text, sample answers, marking rules, creation dates")
+            
+            # Tests Export
+            with st.expander("📋 Export Tests", expanded=True):
+                tests = get_tests(st.session_state.user["_id"])
+                if tests:
+                    test_options = {t.get('test_name', ''): str(t.get('_id', '')) for t in tests}
+                    selected_test = st.selectbox(
+                        "Choose a test:",
+                        options=list(test_options.keys()),
+                        help="Select which test to export"
+                    )
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("📊 Export Test Results"):
+                            test_id = test_options[selected_test]
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, csv_data = import_export_service.export_test_grades_to_csv(test_id)
+                            if success:
+                                st.download_button(
+                                    label="📥 Download Results",
+                                    data=csv_data,
+                                    file_name=f"{selected_test.replace(' ', '_') if selected_test else 'test'}_results.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error("Failed to export results")
+                    
+                    with col2:
+                        if st.button("📝 Export Test Answers"):
+                            test_id = test_options[selected_test]
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, csv_data = import_export_service.export_test_answers_to_csv(test_id)
+                            if success:
+                                st.download_button(
+                                    label="📥 Download Answers",
+                                    data=csv_data,
+                                    file_name=f"{selected_test.replace(' ', '_') if selected_test else 'test'}_answers.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error("Failed to export answers")
+                    
+                    with col3:
+                        if st.button("📋 Get Answer Template"):
+                            test_id = test_options[selected_test]
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, csv_data = import_export_service.generate_test_answer_template_csv(test_id)
+                            if success:
+                                st.download_button(
+                                    label="📥 Download Template",
+                                    data=csv_data,
+                                    file_name=f"{selected_test.replace(' ', '_') if selected_test else 'test'}_template.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error("Failed to generate template")
+                else:
+                    st.info("No tests available for export")
             
             st.divider()
             
-            # Test Answers Template
-            st.write("**📋 Test Answers Template:**")
-            test_answers_template = templates['test_answers']
-            test_output = io.StringIO()
-            test_writer = csv.writer(test_output)
-            test_writer.writerow(test_answers_template['headers'])
-            test_writer.writerow(test_answers_template['example'])
-            st.download_button(
-                label="📥 Download Test Answers Template",
-                data=test_output.getvalue(),
-                file_name="test_answers_template.csv",
-                mime="text/csv"
-            )
-            st.code(test_output.getvalue())
+            # Import Section
+            st.write("### 📥 Import Data")
             
-            st.info("""
-            **Instructions:**
-            1. Download the appropriate template
-            2. Fill in your data following the format
-            3. Save as CSV
-            4. Upload using the Import tab
-            """)
+            # Import Questions
+            with st.expander("📝 Import Questions", expanded=True):
+                st.write("**Upload a CSV file with questions:**")
+                st.write("- Required columns: `question_text`, `sample_answer`")
+                st.write("- Optional columns: `rules` (semicolon-separated)")
+                
+                uploaded_questions = st.file_uploader(
+                    "Choose Questions CSV file",
+                    type=["csv"],
+                    key="questions_upload"
+                )
+                
+                if uploaded_questions and st.button("📥 Import Questions", type="primary"):
+                    with st.spinner("Importing questions..."):
+                        try:
+                            file_content = uploaded_questions.read().decode('utf-8')
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, message, errors = import_export_service.import_questions_from_csv(file_content)
+                            if success:
+                                st.success(f"✅ {message}")
+                                if errors:
+                                    with st.expander(f"⚠️ {len(errors)} warnings occurred", expanded=False):
+                                        for error in errors[:10]:
+                                            st.write(f"• {error}")
+                                        if len(errors) > 10:
+                                            st.write(f"• ... and {len(errors) - 10} more warnings")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
+                                if errors:
+                                    with st.expander("📋 Error Details", expanded=True):
+                                        for error in errors[:10]:
+                                            st.write(f"• {error}")
+                                        if len(errors) > 10:
+                                            st.write(f"• ... and {len(errors) - 10} more errors")
+                        except Exception as e:
+                            st.error(f"❌ Import failed: {str(e)}")
+                            st.info("💡 Make sure your CSV file has the correct format with headers: question_text, sample_answer")
+            
+            # Import Test Answers
+            with st.expander("📋 Import Test Answers", expanded=True):
+                tests = get_tests(st.session_state.user["_id"])
+                if tests:
+                    test_options = {t.get('test_name', ''): str(t.get('_id', '')) for t in tests}
+                    selected_test = st.selectbox(
+                        "Choose test for answers:",
+                        options=list(test_options.keys()),
+                        key="import_test_select"
+                    )
+                    
+                    st.write("**Upload a CSV file with student answers:**")
+                    st.write("- Required columns: `Student Name`, `Student Roll No`")
+                    st.write("- Answer columns: `Q001 Answer`, `Q002 Answer`, etc.")
+                    st.write("- Use the template generator to get the correct format")
+                    
+                    uploaded_answers = st.file_uploader(
+                        "Choose Test Answers CSV file",
+                        type=["csv"],
+                        key="answers_upload"
+                    )
+                    
+                    if uploaded_answers and st.button("📥 Import Test Answers", type="primary"):
+                        with st.spinner("Importing test answers..."):
+                            try:
+                                file_content = uploaded_answers.read().decode('utf-8')
+                                test_id = test_options[selected_test]
+                                import_export_service = ImportExportService(st.session_state.user["_id"])
+                                success, message, errors = import_export_service.import_test_answers_from_csv(file_content, test_id)
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    if errors:
+                                        with st.expander(f"⚠️ {len(errors)} warnings occurred", expanded=False):
+                                            for error in errors[:10]:
+                                                st.write(f"• {error}")
+                                            if len(errors) > 10:
+                                                st.write(f"• ... and {len(errors) - 10} more warnings")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                                    if errors:
+                                        with st.expander("📋 Error Details", expanded=True):
+                                            for error in errors[:10]:
+                                                st.write(f"• {error}")
+                                            if len(errors) > 10:
+                                                st.write(f"• ... and {len(errors) - 10} more errors")
+                            except Exception as e:
+                                st.error(f"❌ Import failed: {str(e)}")
+                                st.info("💡 Make sure your CSV file has the correct format. Use the template generator to get the right format.")
+                else:
+                    st.info("No tests available for answer import")
+            
+            # Help Section
+            with st.expander("❓ Help & Tips", expanded=False):
+                st.write("""
+                **📤 Exporting Data:**
+                - **Questions**: Export all your questions with answers and rules
+                - **Test Results**: Export graded test results with scores
+                - **Test Answers**: Export student answers for a test
+                - **Templates**: Get CSV templates for importing answers
+                
+                **📥 Importing Data:**
+                - **Questions**: Upload CSV with question_text, sample_answer columns
+                - **Test Answers**: Upload CSV with student answers for a specific test
+                
+                **💡 Tips:**
+                - Use templates to ensure correct CSV format
+                - Check the help text for required column names
+                - Large files may take a moment to process
+                """)
 
         with tab4:
             st.subheader("🗑️ Bulk Operations")

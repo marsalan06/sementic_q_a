@@ -4,7 +4,7 @@ from bson.objectid import ObjectId
 from datetime import datetime
 
 client = MongoClient(MONGO_URI)
-db = client[DB_NAME]
+db = client[DB_NAME or "default_db_name"]
 
 def get_db():
     """Get database instance"""
@@ -64,10 +64,6 @@ def detect_rule_type(rule_text):
     # Check for exact phrase indicators
     if "mentions" in rule_lower:
         return "exact_phrase"
-    
-    # Check for math equation indicators
-    elif any(word in rule_lower for word in ["equation", "formula"]):
-        return "math_equation"
     
     # Check for keyword matching indicators
     elif "contains" in rule_lower:
