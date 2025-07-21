@@ -61,6 +61,16 @@ def clear_form_fields_on_reset(form_key):
 
 # --- End Form Reset Utility ---
 
+# --- UI Helper Functions ---
+def display_rule_types_info():
+    """Display rule types information"""
+    st.info("""
+    💡 **Rule Types (Auto-detected):**
+    - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
+    - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
+    - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
+    """)
+
 def set_session_token(token):
     """Store session token in session state."""
     st.session_state.token = token
@@ -339,24 +349,23 @@ def main_app():
         sample_answer = st.text_area("Enter the sample answer:", key="question_sample_answer")
 
         st.subheader("📋 Marking Rules")
-        st.info("""
-        💡 **Rule Types (Auto-detected):**
-        - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
-        - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
-        - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
-        """)
+        display_rule_types_info()
         
         rules = []
         rule_count = st.number_input("How many marking rules?", min_value=1, step=1, key="question_rule_count")
         for i in range(rule_count):
-            rule = st.text_input(f"Rule {i + 1}", key=f"question_rule_{i}")
+            rule = st.text_input(
+                f"Rule {i + 1}", 
+                key=f"question_rule_{i}",
+                placeholder="e.g., 'force equals mass times acceleration' or 'mentions Newton's second law'"
+            )
             if rule:
                 # Show rule type using dynamic detection
                 rule_type = detect_rule_type(rule)
                 icons = {
                     "exact_phrase": "🔍",
                     "contains_keywords": "🔑", 
-                    "semantic": "🧠"
+                    "semantic": "🧠",
                 }
                 st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
             rules.append(rule)
@@ -381,111 +390,125 @@ def main_app():
         if not questions:
             st.info("ℹ️ No questions found. Create your first question in the 'Create Question' tab.")
         else:
-            # Display questions in a clean card format
-            for question in questions:
-                question_id = str(question["_id"])
-                question_text = question["question"]
-                sample_answer = question.get("sample_answer", "")
-                marking_scheme = question.get("marking_scheme", [])
-                created_at = question.get("created_at", "")
+            # Create a dropdown to select questions
+            question_options = {f"{q['question'][:80]}{'...' if len(q['question']) > 80 else ''}": str(q["_id"]) for q in questions}
+            question_options["Select a question to edit..."] = ""
+            
+            selected_question_text = st.selectbox(
+                "Select a question to manage:",
+                options=list(question_options.keys()),
+                index=0,
+                help="Choose a question from the dropdown to edit or delete it"
+            )
+            
+            selected_question_id = question_options[selected_question_text]
+            
+            if selected_question_id and selected_question_id != "":
+                # Get the selected question
+                question = get_question_by_id(selected_question_id, st.session_state.user["_id"])
                 
-                # Get related data counts
-                answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == question_id])
-                grades_count = len([g for g in get_grades(st.session_state.user["_id"]) if str(g.get("question_id")) == question_id])
-                
-                # Create a clean card layout
-                with st.container():
-                    st.markdown("---")
-                    col1, col2, col3 = st.columns([3, 1, 1])
+                if question:
+                    # Display question details in a clean format
+                    st.subheader("📝 Question Details")
+                    
+                    col1, col2 = st.columns([2, 1])
                     
                     with col1:
-                        st.markdown(f"### 📝 {question_text[:100]}{'...' if len(question_text) > 100 else ''}")
-                        if sample_answer:
-                            st.caption(f"**Sample Answer:** {sample_answer[:150]}{'...' if len(sample_answer) > 150 else ''}")
-                        st.write(f"**Created:** {created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'}")
-                        st.write(f"**Rules:** {len(marking_scheme)} marking rules")
-                    
+                        st.markdown(f"**Question:** {question.get('question', 'No question text')}")
+                        if question.get("sample_answer"):
+                            st.markdown(f"**Sample Answer:** {question.get('sample_answer')}")
+                        
+                        # Get related data counts
+                        answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == selected_question_id])
+                        grades_count = len([g for g in get_grades(st.session_state.user["_id"]) if str(g.get("question_id")) == selected_question_id])
+                        
+                        st.write(f"**Created:** {question.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if question.get('created_at') else 'Unknown'}")
+                        st.write(f"**Rules:** {len(question.get('marking_scheme', []))} marking rules")
+                        
+                        # Display existing rules
+                        existing_rules = question.get("marking_scheme", [])
+
+                        if existing_rules:
+                                st.write("**Current Rules:**")
+                                for i, rule in enumerate(existing_rules):
+                                    rule_text = rule.get("text", "")
+                                    if rule_text:
+                                        # Show rule type using dynamic detection
+                                        rule_type = detect_rule_type(rule_text)
+                                        icons = {
+                                            "exact_phrase": "🔍",
+                                            "contains_keywords": "🔑", 
+                                            "semantic": "🧠",
+                                        }
+                                        st.write(f"• **Rule {i + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
+                                st.divider()
                     with col2:
                         st.metric("📝 Answers", answers_count)
                         st.metric("📊 Grades", grades_count)
-                    
-                    with col3:
-                        # Action buttons in a clean row
+                        
+                        # Action buttons
                         col_edit, col_delete = st.columns(2)
                         
                         with col_edit:
-                            if st.button("✏️ Edit", key=f"edit_question_{question_id}"):
-                                st.session_state.edit_question_id = question_id
+                            if st.button("✏️ Edit Question", key=f"edit_question_{selected_question_id}"):
+                                st.session_state.edit_question_id = selected_question_id
                                 st.session_state.show_question_edit = True
                                 st.rerun()
                         
                         with col_delete:
-                            if st.button("🗑️ Delete", key=f"delete_question_{question_id}"):
-                                st.session_state.delete_question_id = question_id
+                            if st.button("🗑️ Delete Question", key=f"delete_question_{selected_question_id}"):
+                                st.session_state.delete_question_id = selected_question_id
                                 st.rerun()
-            
-            # Handle delete confirmation
-            if st.session_state.get('delete_question_id'):
-                question_id = st.session_state.delete_question_id
-                question = get_question_by_id(question_id, st.session_state.user["_id"])
-                if question:
-                    st.warning(f"⚠️ Are you sure you want to delete this question?")
-                    st.write(f"**Question:** {question['question'][:200]}{'...' if len(question['question']) > 200 else ''}")
                     
-                    # Get counts for this specific question
-                    question_answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == question_id])
-                    question_grades_count = len([g for g in get_grades(st.session_state.user["_id"]) if str(g.get("question_id")) == question_id])
-                    st.write(f"**This will also delete:** {question_answers_count} answers and {question_grades_count} grades")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("✅ Yes, Delete"):
-                            success, message = delete_question(question_id, st.session_state.user["_id"])
-                            if success:
-                                st.success(f"✅ {message}")
+                    # Handle delete confirmation
+                    if st.session_state.get('delete_question_id') == selected_question_id:
+                        st.warning(f"⚠️ Are you sure you want to delete this question?")
+                        st.write(f"**Question:** {question.get('question', 'No question text')[:200]}{'...' if len(question.get('question', '')) > 200 else ''}")
+                        
+                        # Get counts for this specific question
+                        question_answers_count = len([a for a in get_student_answers(st.session_state.user["_id"]) if str(a.get("question_id")) == selected_question_id])
+                        question_grades_count = len([g for g in get_grades(st.session_state.user["_id"]) if str(g.get("question_id")) == selected_question_id])
+                        st.write(f"**This will also delete:** {question_answers_count} answers and {question_grades_count} grades")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("✅ Yes, Delete"):
+                                success, message = delete_question(selected_question_id, st.session_state.user["_id"])
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    del st.session_state.delete_question_id
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                        with col2:
+                            if st.button("❌ Cancel"):
                                 del st.session_state.delete_question_id
                                 st.rerun()
-                            else:
-                                st.error(f"❌ {message}")
-                    with col2:
-                        if st.button("❌ Cancel"):
-                            del st.session_state.delete_question_id
-                            st.rerun()
-            
-            # Handle edit form
-            if st.session_state.get('show_question_edit', False) and st.session_state.get('edit_question_id'):
-                question_id = st.session_state.edit_question_id
-                question = get_question_by_id(question_id, st.session_state.user["_id"])
-                
-                if question:
-                    st.subheader("✏️ Edit Question")
                     
-                    # Check for form reset
-                    clear_form_fields_on_reset("edit_question_")
-                    
-                    with st.form("edit_question_form"):
-                        question_text = st.text_area(
-                            "Question Text:", 
-                            value=question["question"], 
-                            key="edit_question_text"
-                        )
-                        sample_answer = st.text_area(
-                            "Sample Answer:", 
-                            value=question.get("sample_answer", ""), 
-                            key="edit_question_sample_answer"
-                        )
+                    # Handle edit form - appears directly below the question details
+                    if st.session_state.get('show_question_edit', False) and st.session_state.get('edit_question_id') == selected_question_id:
+                        st.subheader("✏️ Edit Question")
                         
-                        st.subheader("📋 Marking Rules")
-                        st.info("""
-                        💡 **Rule Types (Auto-detected):**
-                        - 🔍 **exact_phrase**: For formulas and specific mentions (e.g., "mentions F = ma")
-                        - 🔑 **contains_keywords**: For specific terms that must be present (e.g., "contains protons, electrons")
-                        - 🧠 **semantic**: For conceptual understanding (e.g., "explains the relationship")
-                        """)
+                        # Check for form reset
+                        clear_form_fields_on_reset("edit_question_")
                         
-                        # Display existing rules
+                        # Show current rules
                         existing_rules = question.get("marking_scheme", [])
-                        rules = []
+                        if existing_rules:
+                            st.write("**Current Rules:**")
+                            for i, rule in enumerate(existing_rules):
+                                rule_text = rule.get("text", "")
+                                if rule_text:
+                                    rule_type = detect_rule_type(rule_text)
+                                    icons = {
+                                        "exact_phrase": "🔍",
+                                        "contains_keywords": "🔑",
+                                        "semantic": "🧠",
+                                    }
+                                    st.write(f"• **Rule {i + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
+                            st.divider()
+                        
+                        # Rule count input OUTSIDE the form (so it can update dynamically)
                         rule_count = st.number_input(
                             "How many marking rules?", 
                             min_value=1, 
@@ -493,50 +516,69 @@ def main_app():
                             key="edit_question_rule_count"
                         )
                         
-                        for i in range(rule_count):
-                            default_rule = existing_rules[i].get("text", "") if i < len(existing_rules) else ""
-                            rule = st.text_input(
-                                f"Rule {i + 1}", 
-                                value=default_rule,
-                                key=f"edit_question_rule_{i}"
+                        with st.form("edit_question_form"):
+                            question_text = st.text_area(
+                                "Question Text:", 
+                                value=question.get("question", ""), 
+                                key="edit_question_text"
                             )
-                            if rule:
-                                # Show rule type using dynamic detection
-                                rule_type = detect_rule_type(rule)
-                                icons = {
-                                    "exact_phrase": "🔍",
-                                    "contains_keywords": "🔑", 
-                                    "semantic": "🧠"
-                                }
-                                st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
-                            rules.append(rule)
-                        
-                        submitted = st.form_submit_button("💾 Update Question")
-                        
-                        if submitted:
-                            if not question_text or not sample_answer:
-                                st.error("❌ Question text and sample answer are required")
-                            else:
-                                success, message = update_question(
-                                    question_id, question_text, sample_answer, rules, st.session_state.user["_id"]
+                            sample_answer = st.text_area(
+                                "Sample Answer:", 
+                                value=question.get("sample_answer", ""), 
+                                key="edit_question_sample_answer"
+                            )
+                            
+                            st.subheader("📋 Marking Rules")
+                            display_rule_types_info()
+                            
+                            # Rule text boxes inside the form
+                            rules = []
+                            for i in range(rule_count):
+                                default_rule = existing_rules[i].get("text", "") if i < len(existing_rules) else ""
+                                rule = st.text_input(
+                                    f"Rule {i + 1}",
+                                    value=default_rule,
+                                    key=f"edit_question_rule_{i}",
+                                    placeholder="e.g., 'force equals mass times acceleration' or 'mentions Newton's second law'"
                                 )
-                                if success:
-                                    st.success(f"✅ {message}")
-                                    # Clear cached grading results when question is updated
-                                    if 'grading_results' in st.session_state:
-                                        del st.session_state.grading_results
-                                    # Reset form and exit edit mode
-                                    st.session_state.show_question_edit = False
-                                    st.session_state.edit_question_id = None
-                                    reset_form_on_success("edit_question_")
-                                    st.rerun()
+                                if rule:
+                                    rule_type = detect_rule_type(rule)
+                                    icons = {
+                                        "exact_phrase": "🔍",
+                                        "contains_keywords": "🔑",
+                                        "semantic": "🧠",
+                                    }
+                                    st.caption(f"Type: {rule_type} {icons.get(rule_type, '🧠')}")
+                                rules.append(rule)
+                            
+                            submitted = st.form_submit_button("💾 Update Question")
+                            
+                            if submitted:
+                                if not question_text or not sample_answer:
+                                    st.error("❌ Question text and sample answer are required")
                                 else:
-                                    st.error(f"❌ {message}")
-                    
-                    if st.button("❌ Cancel Edit"):
-                        st.session_state.show_question_edit = False
-                        st.session_state.edit_question_id = None
-                        st.rerun()
+                                    success, message = update_question(
+                                        selected_question_id, question_text, sample_answer, rules, st.session_state.user["_id"]
+                                    )
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                        # Clear cached grading results when question is updated
+                                        if 'grading_results' in st.session_state:
+                                            del st.session_state.grading_results
+                                        # Reset form and exit edit mode
+                                        st.session_state.show_question_edit = False
+                                        st.session_state.edit_question_id = None
+                                        reset_form_on_success("edit_question_")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {message}")
+                        
+                        if st.button("❌ Cancel Edit"):
+                            st.session_state.show_question_edit = False
+                            st.session_state.edit_question_id = None
+                            st.rerun()
+            else:
+                st.info("💡 Select a question from the dropdown above to edit or delete it.")
 
     elif page == "Test Management":
         st.header("📋 Test Management")
@@ -562,16 +604,42 @@ def main_app():
                     st.subheader("📋 Select Questions for this Test")
                     st.info("💡 Select the questions you want to include in this test. Students will need to answer all selected questions.")
                     
-                    # Display questions with checkboxes
+                    # Display questions with expandable details and checkboxes
                     selected_questions = []
                     for i, question in enumerate(questions):
-                        question_text = question["question"]
-                        question_id = str(question["_id"])
+                        question_text = question.get("question", "")
+                        question_id = str(question.get("_id", ""))
+                        sample_answer = question.get("sample_answer", "")
+                        marking_scheme = question.get("marking_scheme", [])
                         
                         # Create a unique key for each checkbox
                         checkbox_key = f"test_question_{question_id}"
-                        if st.checkbox(f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", key=checkbox_key):
-                            selected_questions.append(question_id)
+                        
+                        # Create expandable section for each question
+                        with st.expander(f"**Q{i+1}:** {question_text[:80]}{'...' if len(question_text) > 80 else ''}", expanded=False):
+                            # Question details
+                            st.markdown(f"**Question:** {question_text}")
+                            
+                            if sample_answer:
+                                st.markdown(f"**Sample Answer:** {sample_answer}")
+                            
+                            # Display marking rules
+                            if marking_scheme:
+                                st.write("**Marking Rules:**")
+                                for j, rule in enumerate(marking_scheme):
+                                    rule_text = rule.get("text", "")
+                                    if rule_text:
+                                        rule_type = detect_rule_type(rule_text)
+                                        icons = {
+                                            "exact_phrase": "🔍",
+                                            "contains_keywords": "🔑",
+                                            "semantic": "🧠",
+                                        }
+                                        st.write(f"• **Rule {j + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
+                            
+                            # Checkbox for selection
+                            if st.checkbox(f"Select this question", key=checkbox_key):
+                                selected_questions.append(question_id)
                     
                     st.write(f"**Selected Questions:** {len(selected_questions)}")
                     
@@ -598,35 +666,44 @@ def main_app():
             if not tests:
                 st.info("ℹ️ No tests created yet. Create your first test in the 'Create Test' tab.")
             else:
-                # Display tests in a clean card format
-                for test in tests:
-                    test_id = str(test["_id"])
-                    test_name = test["test_name"]
-                    test_description = test.get("test_description", "")
-                    question_count = len(test.get("question_ids", []))
-                    created_at = test.get("created_at", "")
+                # Create a dropdown to select tests
+                test_options = {f"{t['test_name']} ({len(t.get('question_ids', []))} questions)": str(t["_id"]) for t in tests}
+                test_options["Select a test to manage..."] = ""
+                
+                selected_test_text = st.selectbox(
+                    "Select a test to manage:",
+                    options=list(test_options.keys()),
+                    index=0,
+                    help="Choose a test from the dropdown to view details, edit, or delete it"
+                )
+                
+                selected_test_id = test_options[selected_test_text]
+                
+                if selected_test_id and selected_test_text != "Select a test to manage...":
+                    # Get the selected test
+                    test = get_test_by_id(selected_test_id, st.session_state.user["_id"])
                     
-                    # Get test statistics
-                    test_answers = get_test_answers(st.session_state.user["_id"], test_id)
-                    test_grades = get_test_grades(st.session_state.user["_id"], test_id)
-                    
-                    # Create a clean card layout
-                    with st.container():
-                        st.markdown("---")
-                        col1, col2, col3 = st.columns([3, 1, 1])
+                    if test:
+                        # Display test details in a clean format
+                        st.subheader("📋 Test Details")
+                        
+                        col1, col2 = st.columns([2, 1])
                         
                         with col1:
-                            st.markdown(f"### 📋 {test_name}")
-                            if test_description:
-                                st.caption(f"*{test_description}*")
-                            st.write(f"**Created:** {created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else 'Unknown'}")
+                            st.markdown(f"**Test Name:** {test['test_name']}")
+                            if test.get("test_description"):
+                                st.markdown(f"**Description:** {test.get('test_description')}")
+                            
+                            # Get test statistics
+                            test_answers = get_test_answers(st.session_state.user["_id"], selected_test_id)
+                            test_grades = get_test_grades(st.session_state.user["_id"], selected_test_id)
+                            
+                            st.write(f"**Created:** {test.get('created_at', '').strftime('%Y-%m-%d %H:%M:%S') if test.get('created_at') else 'Unknown'}")
+                            st.write(f"**Questions:** {len(test.get('question_ids', []))}")
                         
                         with col2:
                             st.metric("📝 Submissions", len(test_answers))
                             st.metric("📊 Graded", len(test_grades))
-                        
-                        with col3:
-                            st.metric("📋 Questions", question_count)
                             if len(test_answers) > 0 and len(test_grades) > 0:
                                 # Handle percentage values that might be strings
                                 total_score = 0
@@ -641,60 +718,66 @@ def main_app():
                                 avg_score = total_score / len(test_grades)
                                 st.metric("📈 Avg Score", f"{avg_score:.1f}%")
                         
-                        # Action buttons in a clean row
+                        # Action buttons
                         col1, col2, col3, col4, col5 = st.columns(5)
                         
                         with col1:
-                            if st.button("📋 Details", key=f"details_{test_id}"):
-                                st.session_state.selected_test_id = test_id
+                            if st.button("📋 View Details", key=f"details_{selected_test_id}"):
+                                st.session_state.selected_test_id = selected_test_id
                                 st.session_state.show_test_details = True
                                 st.rerun()
                         
                         with col2:
-                            if st.button("✏️ Edit", key=f"edit_test_{test_id}"):
-                                st.session_state.edit_test_id = test_id
+                            if st.button("✏️ Edit Test", key=f"edit_test_{selected_test_id}"):
+                                st.session_state.edit_test_id = selected_test_id
                                 st.session_state.show_test_edit = True
                                 st.rerun()
                         
                         with col3:
                             if len(test_answers) > 0:
-                                if st.button("📊 Results", key=f"results_{test_id}"):
-                                    st.session_state.selected_test_id = test_id
+                                if st.button("📊 View Results", key=f"results_{selected_test_id}"):
+                                    st.session_state.selected_test_id = selected_test_id
                                     st.session_state.show_test_results = True
                                     st.rerun()
                         
                         with col4:
                             if len(test_answers) > 0 and len(test_grades) == 0:
-                                if st.button("🎯 Grade", key=f"grade_{test_id}"):
-                                    st.session_state.selected_test_id = test_id
+                                if st.button("🎯 Grade Test", key=f"grade_{selected_test_id}"):
+                                    st.session_state.selected_test_id = selected_test_id
                                     st.session_state.grade_test = True
                                     st.rerun()
                         
                         with col5:
-                            if st.button("🗑️ Delete", key=f"delete_{test_id}"):
-                                st.session_state.delete_test_id = test_id
+                            if st.button("🗑️ Delete Test", key=f"delete_{selected_test_id}"):
+                                st.session_state.delete_test_id = selected_test_id
                                 st.rerun()
-                
-                # Handle delete confirmation
-                if st.session_state.get('delete_test_id'):
-                    test_id = st.session_state.delete_test_id
-                    test = get_test_by_id(test_id, st.session_state.user["_id"])
-                    if test:
-                        st.warning(f"⚠️ Are you sure you want to delete '{test['test_name']}'?")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("✅ Yes, Delete"):
-                                success, message = delete_test(test_id, st.session_state.user["_id"])
-                                if success:
-                                    st.success(f"✅ {message}")
+                        
+                        # Handle delete confirmation
+                        if st.session_state.get('delete_test_id') == selected_test_id:
+                            st.warning(f"⚠️ Are you sure you want to delete this test?")
+                            st.write(f"**Test:** {test['test_name']}")
+                            
+                            # Get counts for this specific test
+                            test_answers_count = len(test_answers)
+                            test_grades_count = len(test_grades)
+                            st.write(f"**This will also delete:** {test_answers_count} answers and {test_grades_count} grades")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("✅ Yes, Delete"):
+                                    success, message = delete_test(selected_test_id, st.session_state.user["_id"])
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                        del st.session_state.delete_test_id
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {message}")
+                            with col2:
+                                if st.button("❌ Cancel"):
                                     del st.session_state.delete_test_id
                                     st.rerun()
-                                else:
-                                    st.error(f"❌ {message}")
-                        with col2:
-                            if st.button("❌ Cancel"):
-                                del st.session_state.delete_test_id
-                                st.rerun()
+                else:
+                    st.info("💡 Select a test from the dropdown above to view details, edit, or delete it.")
         
         with tab3:
             st.subheader("📤 Upload Test Answers")
@@ -735,7 +818,7 @@ def main_app():
                         for i, qid in enumerate(question_ids, 1):
                             question = next((q for q in questions if str(q["_id"]) == qid), None)
                             if question:
-                                question_text = question["question"]
+                                question_text = question.get("question", "")
                                 answer = st.text_area(
                                     f"Q{i}: {question_text[:100]}{'...' if len(question_text) > 100 else ''}",
                                     max_chars=4000,
@@ -890,30 +973,392 @@ def main_app():
             test_id = st.session_state.selected_test_id
             test = get_test_by_id(test_id, st.session_state.user["_id"])
             test_grades = get_test_grades(st.session_state.user["_id"], test_id)
+            test_answers = get_test_answers(st.session_state.user["_id"], test_id)
+            questions = get_questions(st.session_state.user["_id"])
             
             if test and test_grades:
                 st.subheader(f"📊 Test Results: {test['test_name']}")
                 
-                # Display results in a clean table format
+                # Test overview
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("📝 Students", len(test_grades))
+                with col2:
+                    st.metric("📋 Questions", len(test.get('question_ids', [])))
+                with col3:
+                    # Calculate average score
+                    total_score = 0
+                    for grade in test_grades:
+                        score = grade.get('overall_score', 0)
+                        if isinstance(score, str):
+                            score = float(score.replace('%', '')) / 100
+                        total_score += score
+                    avg_score = (total_score / len(test_grades)) * 100 if test_grades else 0
+                    st.metric("📈 Avg Score", f"{avg_score:.1f}%")
+                with col4:
+                    # Grade distribution
+                    grade_counts = {}
+                    for grade in test_grades:
+                        g = grade.get('overall_grade', 'F')
+                        grade_counts[g] = grade_counts.get(g, 0) + 1
+                    most_common_grade = max(grade_counts.items(), key=lambda x: x[1])[0] if grade_counts else 'F'
+                    st.metric("🏆 Most Common Grade", most_common_grade)
+                
+                st.divider()
+                
+                # Create a comprehensive results table
+                st.subheader("📋 Detailed Results Table")
+                
+                # Get questions for this test
+                test_question_ids = test.get('question_ids', [])
+                test_questions = []
+                for qid in test_question_ids:
+                    question = next((q for q in questions if str(q["_id"]) == qid), None)
+                    if question:
+                        test_questions.append(question)
+                
+                # Create a mapping of student answers
+                answers_dict = {answer.get('student_roll_no'): answer for answer in test_answers}
+                
+                # Create the results table
+                results_data = []
                 for grade in test_grades:
                     student_name = grade.get("student_name", "Unknown")
                     student_roll = grade.get("student_roll_no", "Unknown")
                     overall_score = grade.get("overall_percentage", "0%")
                     overall_grade = grade.get("overall_grade", "F")
                     
-                    with st.expander(f"{student_name} ({student_roll}) - {overall_score} - Grade {overall_grade}", expanded=False):
-                        st.write(f"**Overall Score:** {overall_score}")
-                        st.write(f"**Overall Grade:** {overall_grade}")
-                        st.write(f"**Questions Answered:** {grade.get('answered_questions', 0)}/{grade.get('total_questions', 0)}")
+                    # Get student's answers
+                    student_answer = answers_dict.get(student_roll, {})
+                    question_answers = student_answer.get('question_answers', {})
+                    
+                    # Create row data
+                    row_data = {
+                        "Student Name": student_name,
+                        "Roll No": student_roll,
+                        "Overall Score": overall_score,
+                        "Overall Grade": overall_grade,
+                        "Questions Answered": f"{grade.get('answered_questions', 0)}/{grade.get('total_questions', 0)}"
+                    }
+                    
+                    # Add question-wise scores and answers
+                    question_details = grade.get("question_details", [])
+                    for i, (question, q_detail) in enumerate(zip(test_questions, question_details), 1):
+                        score = q_detail.get("score", 0) * 100
+                        q_grade = q_detail.get("grade", "F")
+                        question_id = str(question["_id"])
+                        student_answer_text = question_answers.get(question_id, "No answer")
                         
-                        # Show question-wise breakdown
-                        st.subheader("📝 Question-wise Breakdown")
-                        question_details = grade.get("question_details", [])
-                        for i, q_detail in enumerate(question_details, 1):
-                            score = q_detail.get("score", 0) * 100
-                            q_grade = q_detail.get("grade", "F")
-                            st.write(f"**Q{i}:** {score:.1f}% (Grade {q_grade})")
+                        row_data[f"Q{i} Score"] = f"{score:.1f}%"
+                        row_data[f"Q{i} Grade"] = q_grade
+                        row_data[f"Q{i} Answer"] = student_answer_text[:100] + "..." if len(student_answer_text) > 100 else student_answer_text
+                    
+                    results_data.append(row_data)
                 
+                # Display the table
+                if results_data:
+                    # Create tabs for different views
+                    tab1, tab2, tab3 = st.tabs(["📊 Summary View", "📝 Detailed View", "🎯 Grading Analysis"])
+                    
+                    with tab1:
+                        st.write("**Summary of student performance:**")
+                        
+                        # Add sorting options
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            sort_by = st.selectbox(
+                                "Sort by:",
+                                ["Overall Score", "Overall Grade", "Student Name", "Roll No"],
+                                help="Choose how to sort the results"
+                            )
+                        with col2:
+                            sort_order = st.selectbox(
+                                "Order:",
+                                ["Descending", "Ascending"],
+                                help="Choose sort order"
+                            )
+                        
+                        # Create a simplified table with just scores and grades
+                        summary_data = []
+                        for row in results_data:
+                            summary_row = {
+                                "Student Name": row.get("Student Name", "Unknown"),
+                                "Roll No": row.get("Roll No", "Unknown"),
+                                "Overall Score": row.get("Overall Score", "0%"),
+                                "Overall Grade": row.get("Overall Grade", "F"),
+                                "Questions Answered": row.get("Questions Answered", "0/0")
+                            }
+                            # Add question scores only
+                            for i in range(1, len(test_questions) + 1):
+                                score_key = f"Q{i} Score"
+                                grade_key = f"Q{i} Grade"
+                                if score_key in row and grade_key in row:
+                                    summary_row[score_key] = row[score_key]
+                                    summary_row[grade_key] = row[grade_key]
+                                else:
+                                    # Handle missing data gracefully
+                                    summary_row[score_key] = "N/A"
+                                    summary_row[grade_key] = "N/A"
+                            summary_data.append(summary_row)
+                        
+                        # Sort the data
+                        reverse_sort = sort_order == "Descending"
+                        if sort_by == "Overall Score":
+                            summary_data.sort(key=lambda x: float(x["Overall Score"].replace('%', '')), reverse=reverse_sort)
+                        elif sort_by == "Overall Grade":
+                            grade_order = {"A": 5, "B": 4, "C": 3, "D": 2, "F": 1}
+                            summary_data.sort(key=lambda x: grade_order.get(x["Overall Grade"], 0), reverse=reverse_sort)
+                        elif sort_by == "Student Name":
+                            summary_data.sort(key=lambda x: x["Student Name"], reverse=reverse_sort)
+                        elif sort_by == "Roll No":
+                            summary_data.sort(key=lambda x: x["Roll No"], reverse=reverse_sort)
+                        
+                        st.dataframe(summary_data, use_container_width=True)
+                        
+                        # Add performance insights
+                        st.subheader("📈 Performance Insights")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            # Grade distribution
+                            grade_counts = {}
+                            for row in summary_data:
+                                grade = row.get("Overall Grade", "F")
+                                grade_counts[grade] = grade_counts.get(grade, 0) + 1
+                            
+                            st.write("**Grade Distribution:**")
+                            for grade in ["A", "B", "C", "D", "F"]:
+                                count = grade_counts.get(grade, 0)
+                                percentage = (count / len(summary_data)) * 100 if summary_data else 0
+                                st.write(f"{grade}: {count} students ({percentage:.1f}%)")
+                        
+                        with col2:
+                            # Score ranges
+                            scores = []
+                            for row in summary_data:
+                                try:
+                                    score_str = row.get("Overall Score", "0%")
+                                    if score_str != "N/A":
+                                        scores.append(float(score_str.replace('%', '')))
+                                except (ValueError, AttributeError):
+                                    continue
+                            if scores:
+                                st.write("**Score Ranges:**")
+                                st.write(f"Highest: {max(scores):.1f}%")
+                                st.write(f"Lowest: {min(scores):.1f}%")
+                                st.write(f"Average: {sum(scores)/len(scores):.1f}%")
+                            else:
+                                st.write("**Score Ranges:** No valid scores available")
+                        
+                        with col3:
+                            # Question performance
+                            st.write("**Question Performance:**")
+                            for i in range(1, len(test_questions) + 1):
+                                score_key = f"Q{i} Score"
+                                q_scores = []
+                                for row in summary_data:
+                                    if score_key in row and row[score_key] != "N/A":
+                                        try:
+                                            q_scores.append(float(row[score_key].replace('%', '')))
+                                        except (ValueError, AttributeError):
+                                            continue
+                                if q_scores:
+                                    avg_q_score = sum(q_scores) / len(q_scores)
+                                    st.write(f"Q{i} Avg: {avg_q_score:.1f}%")
+                                else:
+                                    st.write(f"Q{i} Avg: N/A")
+                    
+                    with tab2:
+                        st.write("**Detailed view with student answers:**")
+                        
+                        # Add search/filter functionality
+                        search_term = st.text_input(
+                            "🔍 Search students:",
+                            placeholder="Enter student name or roll number",
+                            help="Filter results by student name or roll number"
+                        )
+                        
+                        # Filter data based on search
+                        filtered_data = results_data
+                        if search_term:
+                            filtered_data = [
+                                row for row in results_data 
+                                if (row.get("Student Name", "").lower() if row.get("Student Name") else "").find(search_term.lower()) != -1
+                                or (row.get("Roll No", "").lower() if row.get("Roll No") else "").find(search_term.lower()) != -1
+                            ]
+                        
+                        if filtered_data:
+                            st.write(f"**Showing {len(filtered_data)} of {len(results_data)} students**")
+                            st.dataframe(filtered_data, use_container_width=True)
+                        else:
+                            st.info("No students match your search criteria.")
+                        
+                        # Add answer preview options
+                        st.subheader("📝 Answer Preview Options")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            show_full_answers = st.checkbox(
+                                "Show full answers in table",
+                                help="Display complete student answers (may make table very wide)"
+                            )
+                        
+                        with col2:
+                            if show_full_answers:
+                                st.info("💡 Full answers will be displayed in the table above")
+                            else:
+                                st.info("💡 Answers are truncated to 100 characters. Check the box above to see full answers.")
+                    
+                    with tab3:
+                        st.write("**Grading analysis and feedback:**")
+                        
+                        # Show grading details for each student
+                        for grade in test_grades:
+                            student_name = grade.get("student_name", "Unknown")
+                            student_roll = grade.get("student_roll_no", "Unknown")
+                            overall_score = grade.get("overall_percentage", "0%")
+                            overall_grade = grade.get("overall_grade", "F")
+                            
+                            with st.expander(f"📊 {student_name} ({student_roll}) - {overall_score} - Grade {overall_grade}", expanded=False):
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.write(f"**Overall Score:** {overall_score}")
+                                    st.write(f"**Overall Grade:** {overall_grade}")
+                                    st.write(f"**Questions Answered:** {grade.get('answered_questions', 0)}/{grade.get('total_questions', 0)}")
+                                
+                                with col2:
+                                    # Grade color coding
+                                    grade_colors = {"A": "🟢", "B": "🟡", "C": "🟠", "D": "🔴", "F": "⚫"}
+                                    st.write(f"**Performance:** {grade_colors.get(overall_grade, '⚫')} {overall_grade}")
+                                
+                                # Question-wise breakdown with grading details
+                                st.subheader("📝 Question-wise Analysis")
+                                question_details = grade.get("question_details", [])
+                                
+                                for i, (question, q_detail) in enumerate(zip(test_questions, question_details), 1):
+                                    score = q_detail.get("score", 0) * 100
+                                    q_grade = q_detail.get("grade", "F")
+                                    matched_rules = q_detail.get("matched_rules", [])
+                                    missed_rules = q_detail.get("missed_rules", [])
+                                    
+                                    with st.expander(f"Q{i}: {question.get('question', 'No question text')[:100]}{'...' if len(question.get('question', '')) > 100 else ''} - {score:.1f}% (Grade {q_grade})", expanded=False):
+                                        col1, col2 = st.columns(2)
+                                        
+                                        with col1:
+                                            st.write(f"**Score:** {score:.1f}%")
+                                            st.write(f"**Grade:** {q_grade}")
+                                            
+                                            if matched_rules:
+                                                st.write("✅ **Matched Rules:**")
+                                                for rule in matched_rules:
+                                                    st.write(f"• {rule}")
+                                        
+                                        with col2:
+                                            if missed_rules:
+                                                st.write("❌ **Missed Rules:**")
+                                                for rule in missed_rules:
+                                                    st.write(f"• {rule}")
+                                        
+                                        # Show student's answer
+                                        student_answer = answers_dict.get(student_roll, {})
+                                        question_answers = student_answer.get('question_answers', {})
+                                        question_id = str(question["_id"])
+                                        answer_text = question_answers.get(question_id, "No answer")
+                                        
+                                        st.write("**Student's Answer:**")
+                                        st.text_area(
+                                            "Answer",
+                                            value=answer_text,
+                                            height=100,
+                                            disabled=True,
+                                            key=f"analysis_answer_{student_roll}_{question_id}"
+                                        )
+                
+                # Export options
+                st.divider()
+                st.subheader("📤 Export Options")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    if st.button("📊 Export Results (CSV)"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.export_test_grades_to_csv(test_id)
+                        if success:
+                            st.download_button(
+                                label="📥 Download Results CSV",
+                                data=csv_data,
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_results.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to export results")
+                
+                with col2:
+                    if st.button("📝 Export Answers (CSV)"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.export_test_answers_to_csv(test_id)
+                        if success:
+                            st.download_button(
+                                label="📥 Download Answers CSV",
+                                data=csv_data,
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_answers.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to export answers")
+                
+                with col3:
+                    if st.button("📋 Export Test with Questions (CSV)"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.export_test_with_questions_to_csv(test_id)
+                        if success:
+                            st.download_button(
+                                label="📥 Download Test with Questions CSV",
+                                data=csv_data,
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_with_questions.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to export test with questions")
+                
+                with col4:
+                    if st.button("📋 Generate Answer Template (CSV)"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.generate_test_answer_template_csv(test_id)
+                        if success:
+                            st.download_button(
+                                label="📥 Download Answer Template CSV",
+                                data=csv_data,
+                                file_name=f"{test.get('test_name', 'test').replace(' ', '_')}_answer_template.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error("Failed to generate answer template")
+                
+                # Quick actions
+                st.divider()
+                st.subheader("⚡ Quick Actions")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("📋 View Test Details", key="view_test_details_from_results"):
+                        st.session_state.show_test_details = True
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🎯 Re-grade Test", key="regrade_test_from_results"):
+                        st.session_state.grade_test = True
+                        st.rerun()
+                
+                with col3:
+                    if st.button("📤 Upload More Answers", key="upload_answers_from_results"):
+                        # This will take them to the upload tab in test management
+                        st.session_state.show_test_results = False
+                        st.rerun()
+                
+                # Back button
+                st.divider()
                 if st.button("🔙 Back to Test Management", key="back_from_results"):
                     st.session_state.show_test_results = False
                     st.session_state.selected_test_id = None
@@ -938,21 +1383,22 @@ def main_app():
                 for i, qid in enumerate(question_ids, 1):
                     question = next((q for q in questions if str(q["_id"]) == qid), None)
                     if question:
-                        with st.expander(f"Q{i}: {question['question'][:100]}{'...' if len(question['question']) > 100 else ''}", expanded=False):
-                            st.write(f"**Question:** {question['question']}")
+                        with st.expander(f"Q{i}: {question.get('question', 'No question text')[:100]}{'...' if len(question.get('question', '')) > 100 else ''}", expanded=False):
+                            st.write(f"**Question:** {question.get('question', 'No question text')}")
                             if question.get("sample_answer"):
-                                st.write(f"**Sample Answer:** {question['sample_answer']}")
+                                st.write(f"**Sample Answer:** {question.get('sample_answer', '')}")
                             if question.get("marking_scheme"):
                                 st.write("**Marking Rules:**")
-                                for j, rule in enumerate(question["marking_scheme"], 1):
+                                for j, rule in enumerate(question.get("marking_scheme", []), 1):
                                     rule_text = rule.get("text", "")
-                                    rule_type = rule.get("type", "semantic")
-                                    icons = {
-                                        "exact_phrase": "🔍",
-                                        "contains_keywords": "🔑", 
-                                        "semantic": "🧠"
-                                    }
-                                    st.write(f"{j}. {rule_text} {icons.get(rule_type, '🧠')}")
+                                    if rule_text:
+                                        rule_type = detect_rule_type(rule_text)
+                                        icons = {
+                                            "exact_phrase": "🔍",
+                                            "contains_keywords": "🔑",
+                                            "semantic": "🧠",
+                                        }
+                                        st.write(f"• **Rule {j}:** {rule_text} {icons.get(rule_type, '🧠')}")
                 
                 if st.button("🔙 Back to Test Management", key="back_from_details"):
                     st.session_state.show_test_details = False
@@ -990,25 +1436,47 @@ def main_app():
                     if not questions:
                         st.error("❌ No questions found. Please create questions first.")
                     else:
-                        # Display questions with checkboxes
+                        # Display questions with expandable details and checkboxes
                         selected_questions = []
                         current_question_ids = set(test.get("question_ids", []))
                         
                         for i, question in enumerate(questions):
-                            question_text = question["question"]
-                            question_id = str(question["_id"])
+                            question_text = question.get("question", "")
+                            question_id = str(question.get("_id", ""))
+                            sample_answer = question.get("sample_answer", "")
+                            marking_scheme = question.get("marking_scheme", [])
                             
                             # Check if this question is currently selected
                             is_selected = question_id in current_question_ids
                             
                             # Create a unique key for each checkbox
                             checkbox_key = f"edit_test_question_{question_id}"
-                            if st.checkbox(
-                                f"**Q{i+1}:** {question_text[:100]}{'...' if len(question_text) > 100 else ''}", 
-                                value=is_selected,
-                                key=checkbox_key
-                            ):
-                                selected_questions.append(question_id)
+                            
+                            # Create expandable section for each question
+                            with st.expander(f"**Q{i+1}:** {question_text[:80]}{'...' if len(question_text) > 80 else ''}", expanded=False):
+                                # Question details
+                                st.markdown(f"**Question:** {question_text}")
+                                
+                                if sample_answer:
+                                    st.markdown(f"**Sample Answer:** {sample_answer}")
+                                
+                                # Display marking rules
+                                if marking_scheme:
+                                    st.write("**Marking Rules:**")
+                                    for j, rule in enumerate(marking_scheme):
+                                        rule_text = rule.get("text", "")
+                                        if rule_text:
+                                            rule_type = detect_rule_type(rule_text)
+                                            icons = {
+                                                "exact_phrase": "🔍",
+                                                "contains_keywords": "🔑",
+                                                "semantic": "🧠",
+                                            }
+                                            st.write(f"• **Rule {j + 1}:** {rule_text} {icons.get(rule_type, '🧠')}")
+                                
+                                # Checkbox for selection
+                                if st.checkbox(f"Select this question", value=is_selected, key=checkbox_key):
+                                    selected_questions.append(question_id)
                         
                         st.write(f"**Selected Questions:** {len(selected_questions)}")
                         
@@ -1050,10 +1518,10 @@ def main_app():
             st.warning("No questions found. Please create a question first.")
             return
             
-        question_titles = [q["question"] for q in questions]
+        question_titles = [q.get("question", "No question text") for q in questions]
         selected_index = st.selectbox("Select a question:", range(len(question_titles)), format_func=lambda i: question_titles[i])
 
-        selected_question_id = str(questions[selected_index]["_id"])
+        selected_question_id = str(questions[selected_index].get("_id", ""))
 
         # Standards/info box for answer submission
         st.info("""
@@ -1555,48 +2023,209 @@ def main_app():
                 st.warning("⚠️ No questions found. Please create a question first.")
 
         with tab3:
-            st.subheader("📋 Templates (CSV)")
-            templates = import_export_service.get_export_templates()
+            st.subheader("📤 Data Management")
             
-            # Student Answers Template
-            st.write("**📝 Student Answers Template:**")
-            answers_template = templates['student_answers']
-            output = io.StringIO()
-            writer = csv.writer(output)
-            writer.writerow(answers_template['headers'])
-            writer.writerow(answers_template['example'])
-            st.download_button(
-                label="📥 Download Answers Template",
-                data=output.getvalue(),
-                file_name="student_answers_template.csv",
-                mime="text/csv"
-            )
-            st.code(output.getvalue())
+            # Simple, clean layout with clear sections
+            st.info("💡 **Quick Guide:** Export your data for backup or import new data from CSV files.")
+            
+            # Export Section
+            st.write("### 📤 Export Data")
+            
+            # Questions Export
+            with st.expander("📝 Export Questions", expanded=True):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📊 Export All Questions", type="primary"):
+                        import_export_service = ImportExportService(st.session_state.user["_id"])
+                        success, csv_data = import_export_service.export_questions_to_csv()
+                        if success:
+                            st.download_button(
+                                label="📥 Download Questions CSV",
+                                data=csv_data,
+                                file_name="questions_export.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.error(f"❌ {csv_data}")
+                
+                with col2:
+                    st.write("**What's included:** Question text, sample answers, marking rules, creation dates")
+            
+            # Tests Export
+            with st.expander("📋 Export Tests", expanded=True):
+                tests = get_tests(st.session_state.user["_id"])
+                if tests:
+                    test_options = {t.get('test_name', ''): str(t.get('_id', '')) for t in tests}
+                    selected_test = st.selectbox(
+                        "Choose a test:",
+                        options=list(test_options.keys()),
+                        help="Select which test to export"
+                    )
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("📊 Export Test Results"):
+                            test_id = test_options[selected_test]
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, csv_data = import_export_service.export_test_grades_to_csv(test_id)
+                            if success:
+                                st.download_button(
+                                    label="📥 Download Results",
+                                    data=csv_data,
+                                    file_name=f"{selected_test.replace(' ', '_') if selected_test else 'test'}_results.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error("Failed to export results")
+                    
+                    with col2:
+                        if st.button("📝 Export Test Answers"):
+                            test_id = test_options[selected_test]
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, csv_data = import_export_service.export_test_answers_to_csv(test_id)
+                            if success:
+                                st.download_button(
+                                    label="📥 Download Answers",
+                                    data=csv_data,
+                                    file_name=f"{selected_test.replace(' ', '_') if selected_test else 'test'}_answers.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error("Failed to export answers")
+                    
+                    with col3:
+                        if st.button("📋 Get Answer Template"):
+                            test_id = test_options[selected_test]
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, csv_data = import_export_service.generate_test_answer_template_csv(test_id)
+                            if success:
+                                st.download_button(
+                                    label="📥 Download Template",
+                                    data=csv_data,
+                                    file_name=f"{selected_test.replace(' ', '_') if selected_test else 'test'}_template.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.error("Failed to generate template")
+                else:
+                    st.info("No tests available for export")
             
             st.divider()
             
-            # Test Answers Template
-            st.write("**📋 Test Answers Template:**")
-            test_answers_template = templates['test_answers']
-            test_output = io.StringIO()
-            test_writer = csv.writer(test_output)
-            test_writer.writerow(test_answers_template['headers'])
-            test_writer.writerow(test_answers_template['example'])
-            st.download_button(
-                label="📥 Download Test Answers Template",
-                data=test_output.getvalue(),
-                file_name="test_answers_template.csv",
-                mime="text/csv"
-            )
-            st.code(test_output.getvalue())
+            # Import Section
+            st.write("### 📥 Import Data")
             
-            st.info("""
-            **Instructions:**
-            1. Download the appropriate template
-            2. Fill in your data following the format
-            3. Save as CSV
-            4. Upload using the Import tab
-            """)
+            # Import Questions
+            with st.expander("📝 Import Questions", expanded=True):
+                st.write("**Upload a CSV file with questions:**")
+                st.write("- Required columns: `question_text`, `sample_answer`")
+                st.write("- Optional columns: `rules` (semicolon-separated)")
+                
+                uploaded_questions = st.file_uploader(
+                    "Choose Questions CSV file",
+                    type=["csv"],
+                    key="questions_upload"
+                )
+                
+                if uploaded_questions and st.button("📥 Import Questions", type="primary"):
+                    with st.spinner("Importing questions..."):
+                        try:
+                            file_content = uploaded_questions.read().decode('utf-8')
+                            import_export_service = ImportExportService(st.session_state.user["_id"])
+                            success, message, errors = import_export_service.import_questions_from_csv(file_content)
+                            if success:
+                                st.success(f"✅ {message}")
+                                if errors:
+                                    with st.expander(f"⚠️ {len(errors)} warnings occurred", expanded=False):
+                                        for error in errors[:10]:
+                                            st.write(f"• {error}")
+                                        if len(errors) > 10:
+                                            st.write(f"• ... and {len(errors) - 10} more warnings")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
+                                if errors:
+                                    with st.expander("📋 Error Details", expanded=True):
+                                        for error in errors[:10]:
+                                            st.write(f"• {error}")
+                                        if len(errors) > 10:
+                                            st.write(f"• ... and {len(errors) - 10} more errors")
+                        except Exception as e:
+                            st.error(f"❌ Import failed: {str(e)}")
+                            st.info("💡 Make sure your CSV file has the correct format with headers: question_text, sample_answer")
+            
+            # Import Test Answers
+            with st.expander("📋 Import Test Answers", expanded=True):
+                tests = get_tests(st.session_state.user["_id"])
+                if tests:
+                    test_options = {t.get('test_name', ''): str(t.get('_id', '')) for t in tests}
+                    selected_test = st.selectbox(
+                        "Choose test for answers:",
+                        options=list(test_options.keys()),
+                        key="import_test_select"
+                    )
+                    
+                    st.write("**Upload a CSV file with student answers:**")
+                    st.write("- Required columns: `Student Name`, `Student Roll No`")
+                    st.write("- Answer columns: `Q001 Answer`, `Q002 Answer`, etc.")
+                    st.write("- Use the template generator to get the correct format")
+                    
+                    uploaded_answers = st.file_uploader(
+                        "Choose Test Answers CSV file",
+                        type=["csv"],
+                        key="answers_upload"
+                    )
+                    
+                    if uploaded_answers and st.button("📥 Import Test Answers", type="primary"):
+                        with st.spinner("Importing test answers..."):
+                            try:
+                                file_content = uploaded_answers.read().decode('utf-8')
+                                test_id = test_options[selected_test]
+                                import_export_service = ImportExportService(st.session_state.user["_id"])
+                                success, message, errors = import_export_service.import_test_answers_from_csv(file_content, test_id)
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    if errors:
+                                        with st.expander(f"⚠️ {len(errors)} warnings occurred", expanded=False):
+                                            for error in errors[:10]:
+                                                st.write(f"• {error}")
+                                            if len(errors) > 10:
+                                                st.write(f"• ... and {len(errors) - 10} more warnings")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                                    if errors:
+                                        with st.expander("📋 Error Details", expanded=True):
+                                            for error in errors[:10]:
+                                                st.write(f"• {error}")
+                                            if len(errors) > 10:
+                                                st.write(f"• ... and {len(errors) - 10} more errors")
+                            except Exception as e:
+                                st.error(f"❌ Import failed: {str(e)}")
+                                st.info("💡 Make sure your CSV file has the correct format. Use the template generator to get the right format.")
+                else:
+                    st.info("No tests available for answer import")
+            
+            # Help Section
+            with st.expander("❓ Help & Tips", expanded=False):
+                st.write("""
+                **📤 Exporting Data:**
+                - **Questions**: Export all your questions with answers and rules
+                - **Test Results**: Export graded test results with scores
+                - **Test Answers**: Export student answers for a test
+                - **Templates**: Get CSV templates for importing answers
+                
+                **📥 Importing Data:**
+                - **Questions**: Upload CSV with question_text, sample_answer columns
+                - **Test Answers**: Upload CSV with student answers for a specific test
+                
+                **💡 Tips:**
+                - Use templates to ensure correct CSV format
+                - Check the help text for required column names
+                - Large files may take a moment to process
+                """)
 
         with tab4:
             st.subheader("🗑️ Bulk Operations")
