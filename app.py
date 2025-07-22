@@ -297,46 +297,73 @@ def logout():
 
 # --- Main App ---
 def main_app():
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+    # Add custom CSS for padding and button width
+    st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 2rem;
+    }
+    .stButton>button {
+        width: 100%;
+    }
+    .header-text {
+        font-size: 1.5rem;
+        display: flex;
+        align-items: center;
+        height: 100%;
+        margin-bottom: 0;
+    }
+    .session-info {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 5px;
+        height: auto;
+        min-height: 60px;
+    }
+    .button-container {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        justify-content: center;
+        height: 100%;
+        align-items: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Improved header layout: Logo/Title | Center (Welcome, Session Info, Buttons) | (empty/future)
+    col1, col2, col3 = st.columns([3, 6, 3])
+
     with col1:
-        st.title("🎓 Scorix")
+        st.markdown("<h1 class=''> 🎓Scorix</h1>", unsafe_allow_html=True)
+
     with col2:
-        st.write(f"**Welcome, {st.session_state.user['username']}!**")
+        # Use flexbox to align session info
+        st.markdown("<div class=''>", unsafe_allow_html=True)
+        user = st.session_state.user
+        if user:
+            st.markdown(f"<b>Welcome, {user['username']}!</b>", unsafe_allow_html=True)
+
         session_info = get_session_info(st.session_state.token)
         if session_info:
             if session_info['is_expired']:
                 st.error("⚠️ Session expired")
             else:
                 time_remaining = int(session_info['expires_at'] - time.time())
-                if time_remaining > 3600:
-                    st.success(f"🟢 Session active ({time_remaining//3600}h {(time_remaining%3600)//60}m)")
-                elif time_remaining > 300:
-                    st.warning(f"🟡 Session expires in {time_remaining//60}m")
-                else:
-                    st.error(f"🔴 Session expires in {time_remaining}s")
-        
-        # Session persistence indicator
-        token = get_session_token()
-        if token:
-            if 'token' in st.query_params:
-                st.info("🔗 Session persisted (will survive page reloads)")
-            else:
-                st.warning("⚠️ Session not persisted (may be lost on reload)")
+                st.success(f"🟢 Session active ({time_remaining//3600}h {(time_remaining%3600)//60}m)")
+                # st.info("🔗 Session persisted (will survive page reloads)")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with col3:
-        if st.button("🔄 Refresh Session"):
-            refreshed_token = refresh_session_token(st.session_state.token)
-            if refreshed_token:
-                set_session_token(refreshed_token)
-                save_session_to_mongo()
-                set_session_persistent()
-                st.success("Session refreshed!")
-                st.rerun()
-            else:
-                st.error("Failed to refresh session")
-    with col4:
-        if st.button("🚪 Logout"):
-            logout()
-    # Navigation
+        # Use flexbox to align the buttons
+        st.markdown("<div class='button-container'>", unsafe_allow_html=True)
+        st.button("🔄 Refresh Session", on_click=refresh_session_token, args=(st.session_state.token,))
+        st.button("🚪 Logout", on_click=logout)
+        st.markdown("</div>", unsafe_allow_html=True)
+        # Navigation
     page = st.sidebar.selectbox("Navigation", ["Create Question", "Question Management", "Test Management", "Upload Answers", "Grade Settings", "Run Grading", "Data Management"])
     
     if page == "Create Question":
